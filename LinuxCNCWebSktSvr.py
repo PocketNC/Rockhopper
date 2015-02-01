@@ -65,9 +65,9 @@ def natural_keys(text):
     return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
 
     
-UpdateStatusPollPeriodInMilliSeconds = 100
-UpdateHALPollPeriodInMilliSeconds = 500
-UpdateErrorPollPeriodInMilliseconds = 100
+UpdateStatusPollPeriodInMilliSeconds = 50
+UpdateHALPollPeriodInMilliSeconds = 50
+UpdateErrorPollPeriodInMilliseconds = 50
 
 eps = float(0.000001)
 
@@ -708,6 +708,7 @@ StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
+StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
