@@ -144,11 +144,21 @@ class LinuxCNCStatusPoller(object):
             myinstance = instance_number
             pollStartDelay = 0
 
+            s = linuxcnc.stat()
+            try:
+                s.poll()
+                is_alive = True
+                print "WE'RE ALIVE"
+            except:
+                is_alive = False
+                print "WE'RE NOT ALIVE"
+
             while (myinstance == instance_number):
                 
                 # first, check if linuxcnc is running at all
                 # if (not os.path.isfile( '/tmp/linuxcnc.lock' ) or os.path.isfile('/tmp/linuxcnc.shutdown') ):
-                if (not os.path.isfile( '/tmp/linuxcnc.lock' ) ):
+                # if (not os.path.isfile( '/tmp/linuxcnc.lock' ) ):
+                if not is_alive:
                     pollStartDelay = 0
                     self.hal_mutex.acquire()
                     try:
@@ -1436,6 +1446,9 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
         super( LinuxCNCCommandWebSocketHandler, self ).__init__( *args, **kwargs )
         self.user_validated = False
         print "New websocket Connection..."
+
+    def check_origin(self, origin):
+        return True
     
     def open(self,arg):
         global LINUXCNCSTATUS
