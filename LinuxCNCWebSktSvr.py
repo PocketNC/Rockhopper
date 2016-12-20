@@ -65,7 +65,7 @@ linuxcnc_command = linuxcnc.command()
 INI_FILENAME = ''
 INI_FILE_PATH = ''
 
-CONFIG_FILENAME = 'CLIENT_CONFIG.JSON'
+CONFIG_FILENAME = '/home/pocketnc/servers/Rockhopper/CLIENT_CONFIG.JSON'
 
 MAX_BACKPLOT_LINES=50000
 
@@ -1448,7 +1448,7 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
         print "New websocket Connection..."
 
     def check_origin(self, origin):
-        return True
+        return origin in [ "http://192.168.7.2", "http://192.168.7.2:8000", "http://www.pocketnc.com", "https://pocketnc.github.io" ]
     
     def open(self,arg):
         global LINUXCNCSTATUS
