@@ -52,9 +52,9 @@ from random import random
 from time import strftime
 from optparse import OptionParser
     
-UpdateStatusPollPeriodInMilliSeconds = 50
+UpdateStatusPollPeriodInMilliSeconds = 100
 UpdateHALPollPeriodInMilliSeconds = 500
-UpdateErrorPollPeriodInMilliseconds = 25
+UpdateErrorPollPeriodInMilliseconds = 100
 
 eps = float(0.000001)
 
@@ -1448,7 +1448,7 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
         print "New websocket Connection..."
 
     def check_origin(self, origin):
-        return origin in [ "http://192.168.7.2", "http://192.168.7.2:8000", "http://www.pocketnc.com", "https://pocketnc.github.io" ]
+        return origin in [ "http://192.168.7.2", "http://192.168.7.2:8000", "http://www.pocketnc.com", "https://pocketnc.github.io", "http://pocketnc.local" ]
     
     def open(self,arg):
         global LINUXCNCSTATUS
@@ -1769,8 +1769,9 @@ def main():
         print "Parsing INI File Name"
 
     if len(args) < 1:
-        sys.exit('Usage: LinuxCNCWebSktSvr.py <LinuxCNC_INI_file_name>')
-    INI_FILENAME = args[0]
+        INI_FILENAME = "/home/pocketnc/linuxcnc/configs/ARM.BeagleBone.PocketNC/PocketNC.ini"
+    else:
+        INI_FILENAME = args[0]
     [INI_FILE_PATH, x] = os.path.split( INI_FILENAME )
 
     if ( int(options.verbose) > 4):
