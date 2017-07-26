@@ -51,6 +51,7 @@ import glob
 from random import random
 from time import strftime
 from optparse import OptionParser
+from netifaces import interfaces, ifaddresses, AF_INET
     
 UpdateStatusPollPeriodInMilliSeconds = 100
 UpdateHALPollPeriodInMilliSeconds = 500
@@ -1448,7 +1449,15 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
         print "New websocket Connection..."
 
     def check_origin(self, origin):
-        return origin in [ "http://192.168.7.2", "http://192.168.7.2:8000", "http://www.pocketnc.com", "https://pocketnc.github.io", "http://pocketnc.local" ]
+
+        # allow any connection from our own web interfaces
+        for ifaceName in interfaces():
+            addresses = ["http://%s" % (i['addr']) for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}] )]
+            addresses8000 = ["http://%s:8000" % (i['addr']) for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}] )]
+            if origin in addresses or origin in addresses8000:
+                return True
+        
+        return origin in [ "http://www.pocketnc.com", "https://pocketnc.github.io", "http://pocketnc.local" ]
     
     def open(self,arg):
         global LINUXCNCSTATUS
