@@ -823,6 +823,26 @@ class CommandItem( object ):
         return reply
            
 
+    def del_gcode_file(self, filename):
+        reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+
+        try:
+            # strip off just the filename, if a path was given
+            # we will only look in the config directory, so we ignore path
+            [h,f] = os.path.split( filename )
+
+            path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
+
+            try:
+                os.remove(os.path.join(path, f))
+            except:
+                reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        except Exception as ex:
+            print ex
+            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        return reply         
+            
+
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
 
@@ -979,6 +999,8 @@ class CommandItem( object ):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
                     reply = self.put_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']))
+                elif (self.name == 'program_delete'):
+                    reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip())
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) );
                 elif (self.name == 'add_user'):
@@ -1018,6 +1040,7 @@ CommandItem( name='mode',                    paramTypes=[ {'pname':'mode', 'ptyp
 CommandItem( name='override_limits',         paramTypes=[],      help='set the override axis limits flag.' ).register_in_dict( CommandItems )
 CommandItem( name='program_open',            paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}],      help='Open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
+CommandItem( name='program_delete',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Delete a file from the programs directory.' ).register_in_dict( CommandItems )
 CommandItem( name='reset_interpreter',       paramTypes=[],      help='reset the RS274NGC interpreter' ).register_in_dict( CommandItems )
 CommandItem( name='set_adaptive_feed',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='set adaptive feed flag ' ).register_in_dict( CommandItems )
 CommandItem( name='set_analog_output',       paramTypes=[ {'pname':'index', 'ptype':'int', 'optional':False}, {'pname':'value', 'ptype':'float', 'optional':False} ],      help='set analog output pin to value' ).register_in_dict( CommandItems )
