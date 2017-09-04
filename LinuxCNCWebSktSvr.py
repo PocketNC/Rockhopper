@@ -361,7 +361,8 @@ class StatusItem( object ):
         try:
             f = open(filename, 'r')
             ret = f.read()
-        except:
+        except ex:
+            print ex
             ret = ""
         finally:
             f.close()
@@ -509,7 +510,7 @@ class StatusItem( object ):
         except:
             pass
         try:
-            file_list = glob.glob(  os.path.join(directory,'*.ngc') )
+            file_list = glob.glob(  os.path.join(directory,'*.[nN][gG][cC]') )
         except:
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
@@ -823,7 +824,9 @@ class CommandItem( object ):
         return reply
            
 
-    def del_gcode_file(self, filename):
+    def del_gcode_file(self, filename, linuxcnc_status_poller):
+        global linuxcnc_command
+
         reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
         try:
@@ -831,8 +834,14 @@ class CommandItem( object ):
             # we will only look in the config directory, so we ignore path
             [h,f] = os.path.split( filename )
 
+            [openFilePath,openFile] = os.path.split( linuxcnc_status_poller.linuxcnc_status.file )
+
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
 
+            openDefault = StatusItem.get_ini_data( only_section='DISPLAY', only_name='OPEN_FILE' )['data']['parameters'][0]['values']['value']
+
+            if os.path.samefile(openFilePath,path) and openFile == f:
+                linuxcnc_command.program_open(openDefault)
             try:
                 os.remove(os.path.join(path, f))
             except:
@@ -1000,7 +1009,7 @@ class CommandItem( object ):
                 elif (self.name == 'program_upload'):
                     reply = self.put_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']))
                 elif (self.name == 'program_delete'):
-                    reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip())
+                    reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) );
                 elif (self.name == 'add_user'):
