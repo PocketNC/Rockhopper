@@ -1,0 +1,3 @@
+*.pyc
+static/halgraph.svg
+CLIENT_CONFIG.json
