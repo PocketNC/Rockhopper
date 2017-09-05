@@ -746,12 +746,122 @@ class CommandItem( object ):
     def register_in_dict( self, dictionary ):
         dictionary[ self.name ] = self
 
+    def temp_set_ini_data( self, commandDict, linuxcnc_status_poller ):
+        global HAL_INTERFACE
+
+        reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        iniitem2halpins = {
+            'AXIS_0': {
+                'BACKLASH': 'ini.0.backlash',
+                'DIRHOLD': 'hal_pru_generic.stepgen.00.dirhold',
+                'DIRSETUP': 'hal_pru_generic.stepgen.00.dirsetup',
+                'FERROR': 'ini.0.ferror',
+                'MAX_ACCELERATION': 'ini.0.max_acceleration',
+                'MAX_VELOCITY': 'ini.0.max_velocity',
+                'MIN_FERROR': 'ini.0.min_ferror',
+                'MAX_LIMIT': 'ini.0.max_limit',
+                'MIN_LIMIT': 'ini.0.min_limit',
+                'SCALE': 'hal_pru_generic.stepgen.00.position-scale',
+                'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.00.maxaccel',
+                'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.00.maxvel',
+                'STEPLEN': 'hal_pru_generic.stepgen.00.steplen',
+                'STEPSPACE': 'hal_pru_generic.stepgen.00.stepspace'
+            },
+            'AXIS_1': {
+                'BACKLASH': 'ini.1.backlash',
+                'DIRHOLD': 'hal_pru_generic.stepgen.01.dirhold',
+                'DIRSETUP': 'hal_pru_generic.stepgen.01.dirsetup',
+                'FERROR': 'ini.1.ferror',
+                'MAX_ACCELERATION': 'ini.1.max_acceleration',
+                'MAX_VELOCITY': 'ini.1.max_velocity',
+                'MIN_FERROR': 'ini.1.min_ferror',
+                'MAX_LIMIT': 'ini.1.max_limit',
+                'MIN_LIMIT': 'ini.1.min_limit',
+                'SCALE': 'hal_pru_generic.stepgen.01.position-scale',
+                'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.01.maxaccel',
+                'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.01.maxvel',
+                'STEPLEN': 'hal_pru_generic.stepgen.01.steplen',
+                'STEPSPACE': 'hal_pru_generic.stepgen.01.stepspace'
+            },
+            'AXIS_2': {
+                'BACKLASH': 'ini.2.backlash',
+                'DIRHOLD': 'hal_pru_generic.stepgen.02.dirhold',
+                'DIRSETUP': 'hal_pru_generic.stepgen.02.dirsetup',
+                'FERROR': 'ini.2.ferror',
+                'MAX_ACCELERATION': 'ini.2.max_acceleration',
+                'MAX_VELOCITY': 'ini.2.max_velocity',
+                'MIN_FERROR': 'ini.2.min_ferror',
+                'MAX_LIMIT': 'ini.2.max_limit',
+                'MIN_LIMIT': 'ini.2.min_limit',
+                'SCALE': 'hal_pru_generic.stepgen.02.position-scale',
+                'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.02.maxaccel',
+                'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.02.maxvel',
+                'STEPLEN': 'hal_pru_generic.stepgen.02.steplen',
+                'STEPSPACE': 'hal_pru_generic.stepgen.02.stepspace'
+            },
+            'AXIS_3': {
+                'BACKLASH': 'ini.3.backlash',
+                'DIRHOLD': 'hal_pru_generic.stepgen.03.dirhold',
+                'DIRSETUP': 'hal_pru_generic.stepgen.03.dirsetup',
+                'FERROR': 'ini.3.ferror',
+                'MAX_ACCELERATION': 'ini.3.max_acceleration',
+                'MAX_VELOCITY': 'ini.3.max_velocity',
+                'MIN_FERROR': 'ini.3.min_ferror',
+                'MAX_LIMIT': 'ini.3.max_limit',
+                'MIN_LIMIT': 'ini.3.min_limit',
+                'SCALE': 'hal_pru_generic.stepgen.03.position-scale',
+                'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.03.maxaccel',
+                'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.03.maxvel',
+                'STEPLEN': 'hal_pru_generic.stepgen.03.steplen',
+                'STEPSPACE': 'hal_pru_generic.stepgen.03.stepspace'
+            },
+            'AXIS_4': {
+                'BACKLASH': 'ini.4.backlash',
+                'DIRHOLD': 'hal_pru_generic.stepgen.04.dirhold',
+                'DIRSETUP': 'hal_pru_generic.stepgen.04.dirsetup',
+                'FERROR': 'ini.4.ferror',
+                'MAX_ACCELERATION': 'ini.4.max_acceleration',
+                'MAX_VELOCITY': 'ini.4.max_velocity',
+                'MIN_FERROR': 'ini.4.min_ferror',
+                'MAX_LIMIT': 'ini.4.max_limit',
+                'MIN_LIMIT': 'ini.4.min_limit',
+                'SCALE': 'hal_pru_generic.stepgen.04.position-scale',
+                'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.04.maxaccel',
+                'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.04.maxvel',
+                'STEPLEN': 'hal_pru_generic.stepgen.04.steplen',
+                'STEPSPACE': 'hal_pru_generic.stepgen.04.stepspace'
+            }
+        }
+
+        data = commandDict['data']
+        section = iniitem2halpins.get(data['section'])
+        if section:
+            pin = section.get(data['name'])
+            if pin:
+                linuxcnc_status_poller.hal_mutex.acquire()
+                try:
+                    HAL_INTERFACE.set_p(pin, data['value'])
+                    reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
+                except ex:
+                    print "Error setting hal pin"
+                    print ex
+                finally:
+                    linuxcnc_status_poller.hal_mutex.release()
+            else:
+                print "No pin found for variable %s in section %s" % (data['name'], data['section'])
+        else:
+            print "No section %s" % (data['section'])
+
+        return reply
+
     # called in a "put_config" command to write INI data to INI file, completely re-writing the file
     def put_ini_data( self, commandDict ):
         global INI_FILENAME
         global INI_FILE_PATH         
         reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
         try:
+            print "Writing INI file..."
             # construct the section list
             sections = {}
             sections_sorted = []
@@ -913,6 +1023,13 @@ class CommandItem( object ):
         return reply 
     
 
+    def restart_linuxcnc_and_rockhopper( self ):
+        try:
+            p = subprocess.Popen( ['/home/pocketnc/servers/Rockhopper/restartPocketNC.sh'] , stderr=subprocess.STDOUT )
+            return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        except:
+            return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
     def shutdown_linuxcnc( self ):
         try:
             displayname = StatusItem.get_ini_data( only_section='DISPLAY', only_name='DISPLAY' )['data']['parameters'][0]['values']['value']
@@ -998,12 +1115,16 @@ class CommandItem( object ):
                     reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
                 elif (self.name == 'config'): 
                     reply = self.put_ini_data(passed_command_dict)
+                elif (self.name == 'temp_set_config_item'): 
+                    reply = self.temp_set_ini_data(passed_command_dict, linuxcnc_status_poller)
                 elif (self.name == 'clear_error'):
                     lastLCNCerror = ""
                 elif (self.name == 'halfile'):
                     reply = self.put_hal_file( filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict.get['1']) )
                 elif (self.name == 'shutdown'):
                     reply = self.shutdown_linuxcnc()
+                elif (self.name == 'restart'):
+                    reply = self.restart_linuxcnc_and_rockhopper()
                 elif (self.name == 'startup'):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
@@ -1072,6 +1193,7 @@ CommandItem( name='unhome',                  paramTypes=[ {'pname':'axis', 'ptyp
 CommandItem( name='wait_complete',           paramTypes=[ {'pname':'timeout', 'ptype':'float', 'optional':True} ],       help='wait for completion of the last command sent. If timeout in seconds not specified, default is 1 second' ).register_in_dict( CommandItems )
 
 CommandItem( name='config',                  paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Temporarily set a single INI config item so that the change takes effect in linuxcnc, but is not saved to the INI file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='halfile',                 paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ],       help='Overwrite the specified file.  Parameter is a filename, then a string containing the new hal file contents.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear the last error condition.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
@@ -1079,6 +1201,7 @@ CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='restart',                paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='startup',                 paramTypes=[ ],       help='Start LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # *****************************************************
@@ -1256,44 +1379,51 @@ ConfigHelp['AXIS_9'] = ConfigHelp['AXIS_0'];
 class HALInterface( object ):
     def __init__(self):
         self.h = None
-        return  #****************************************************************** This section omitted for now during debugging.  Re-enable later.
-        try:
-            self.h = hal.component("LinuxCNCWebSktSvr")
+        i = 0
+        while self.h is None:
+            try:
+            # hal seems to want to create a component before letting us set hal pins
+            # When the Rockhopper server restarts, we still need to create a component, but we've already created one before so we have to cycle until we get a unique one
+            # TODO, do this a better way?
+                self.h = hal.component("LinuxCNCWebSktSvr%s" % i)
 
-            # create hal pins
-            self.h.newpin("keepalive_counter", hal.HAL_U32, hal.HAL_OUT)
-            self.h.newpin("time_since_keepalive", hal.HAL_FLOAT, hal.HAL_OUT)
-            self.h['keepalive_counter'] = 0
-            self.h['time_since_keepalive'] = 0
-            self.keepalive_counter = 0
-            self.time_of_last_keepalive = time.time()
-            self.time_elapsed = 0
+            #    # create hal pins
+            #    self.h.newpin("keepalive_counter", hal.HAL_U32, hal.HAL_OUT)
+            #    self.h.newpin("time_since_keepalive", hal.HAL_FLOAT, hal.HAL_OUT)
+            #    self.h['keepalive_counter'] = 0
+            #    self.h['time_since_keepalive'] = 0
+            #    self.keepalive_counter = 0
+            #    self.time_of_last_keepalive = time.time()
+            #    self.time_elapsed = 0
 
-            # begin the poll-update loop of the linuxcnc system
-            self.scheduler = tornado.ioloop.PeriodicCallback( self.poll_update, UpdateHALOutputsPollPeriodInMilliSeconds, io_loop=main_loop )
-            self.scheduler.start()
+                # begin the poll-update loop of the linuxcnc system
+            #    self.scheduler = tornado.ioloop.PeriodicCallback( self.poll_update, UpdateHALOutputsPollPeriodInMilliSeconds, io_loop=main_loop )
+            #    self.scheduler.start()
 
-            self.h.ready()
-        except:
-            self.h = None
-            print "WARNING: NO HAL PIN INTERFACE.  HAL Pin creation failed."
-            logging.warn("WARNING: NO HAL PIN INTERFACE.  HAL Pin creation failed.")
+            #    self.h.ready()
+            except hal.error as e:
+                print "Failed to create hal component, LinuxCNCWebSktSvr%s, already created it? " % i, e
+                i += 1
         
-    def Tick( self ):
-        if ( self.h is not None ):
-            self.keepalive_counter = self.keepalive_counter + 1
-            self.h['keepalive_counter'] = self.keepalive_counter
-            previous_time = self.time_of_last_keepalive
-            self.time_of_last_keepalive = time.time()
-            self.time_elapsed = self.time_of_last_keepalive - previous_time
-            self.h['time_since_keepalive'] = self.time_elapsed
+#    def Tick( self ):
+#        if ( self.h is not None ):
+#            self.keepalive_counter = self.keepalive_counter + 1
+#            self.h['keepalive_counter'] = self.keepalive_counter
+#            previous_time = self.time_of_last_keepalive
+#            self.time_of_last_keepalive = time.time()
+#            self.time_elapsed = self.time_of_last_keepalive - previous_time
+#            self.h['time_since_keepalive'] = self.time_elapsed
 
-    def poll_update( self ):
-        if ( self.h is not None ):
-            previous_time = self.time_of_last_keepalive
-            now_time = time.time()
-            self.time_elapsed = now_time - previous_time
-            self.h['time_since_keepalive'] = self.time_elapsed
+#    def poll_update( self ):
+#        if ( self.h is not None ):
+#            previous_time = self.time_of_last_keepalive
+#            now_time = time.time()
+#            self.time_elapsed = now_time - previous_time
+#            self.h['time_since_keepalive'] = self.time_elapsed
+
+    def set_p( self, name, value ):
+        if self.h is not None:
+            hal.set_p(name, value)
 
 HAL_INTERFACE = HALInterface()        
 

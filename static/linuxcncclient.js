@@ -453,6 +453,15 @@ EditableGrid.prototype.initializeGrid = function(  )
     {
         // register the function that will handle model changes
         modelChanged = function(rowIndex, columnIndex, oldValue, newValue, row) {
+            console.log("in modelChanged", rowIndex, columnIndex, oldValue, newValue, row);
+
+            var vals = gEditableGrid.getRowValues(rowIndex);
+            vals['section'] = ConfigCurrentSectionSelection;
+            console.log(vals);
+
+            var cmd = JSON.stringify({ "id":"TempSetINIData", "command":"put", "name":"temp_set_config_item", "data":vals });
+            ws.send( cmd ) ;
+
             if (!modelChangesIgnored)
                 window.onbeforeunload = confirmExit;
         };         
@@ -533,6 +542,7 @@ function ConfigUpdateFromGridToDataStore( )
         var newobj = { 'id':gEditableGrid.getRowId(idx), 'values':vals };
         ConfigData[ConfigCurrentSectionSelection].push(newobj);
     }
+    console.log(ConfigData);
     
     modelChangesIgnored = false;
 }
@@ -1019,6 +1029,11 @@ function SystemSocketMessageHandler(evt)
         document.getElementById("Command_Reply").innerHTML = "Server replied: " + result["code"];
     }
 
+}
+
+function SystemRestart()
+{
+    ws.send( JSON.stringify({ "id":"SystemRestart", "command":"put", "name":"restart" }) ) ;
 }
 
 function SystemShutdown()
