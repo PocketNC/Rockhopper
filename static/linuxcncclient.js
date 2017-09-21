@@ -134,6 +134,7 @@ function StatusListRecieved(evt)
 
     // parse the list of status items from the server
     var status_item_list = JSON.parse(evt.data);
+    console.log(status_item_list);
 
     // Create the table of status items
     var root=document.getElementById("LinuxCNCStatusTable");
@@ -175,8 +176,8 @@ function StatusListRecieved(evt)
     {
         var arcnt ;
 		
-		if (!status_item_list['data'][i]['watchable'])
-			continue;
+//		if (!status_item_list['data'][i]['watchable'])
+//			continue;
 		
         if (status_item_list['data'][i]["isarray"])
             arcnt = status_item_list['data'][i]["arraylength"];

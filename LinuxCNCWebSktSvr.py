@@ -500,6 +500,18 @@ class StatusItem( object ):
 
         return reply
 
+    def get_current_version(self):
+        # TODO use libgit or shell out to terminal to get current git version: "git describe" in pocketnc directory
+        print "in get_current_version"
+
+        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": "v2.0.beta0" }
+
+    def get_versions(self):
+        # TODO use libgit or shell out to terminal to get current git all available versions: "git tag -l" in pocketnc directory
+        print "in get_versions"
+
+        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": list(reversed(["v2.0.beta0", "v2.0.beta1", "v2.0.beta2", "v2.0.beta3"])) }
+
     def list_gcode_files( self, directory ):
         file_list = []
         code = LinuxCNCServerCommand.REPLY_COMMAND_OK
@@ -575,6 +587,10 @@ class StatusItem( object ):
                     ret['data'] = INI_FILENAME
                 elif (self.name == 'file_content'):
                     ret['data'] = self.read_gcode_file(linuxcnc_status_poller.linuxcnc_status.file)
+                elif (self.name == 'versions'):
+                    ret = self.get_versions();
+                elif (self.name == 'current_version'):
+                    ret = self.get_current_version();
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
                 elif (self.name == 'halgraph'):
@@ -651,6 +667,8 @@ StatusItem( name='feed_override_enabled',    watchable=True, valtype='int' ,    
 StatusItem( name='feedrate',                 watchable=True, valtype='float' ,  help='current feedrate' ).register_in_dict( StatusItems )
 StatusItem( name='file',                     watchable=True, valtype='string' , help='currently executing gcode file' ).register_in_dict( StatusItems )
 StatusItem( name='file_content',             coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='currently executing gcode file contents' ).register_in_dict( StatusItems )
+StatusItem( name='versions',                 requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string[]' , help='available PocketNC versions (list of tags available in git repository)').register_in_dict( StatusItems )
+StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='current PocketNC version (current tag in git repository)' ).register_in_dict( StatusItems )
 StatusItem( name='flood',                    watchable=True, valtype='int' ,    help='flood enabled' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_index',                watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_offset',               watchable=True, valtype='float[]', help='offset of the currently active coordinate system, a pose' ).register_in_dict( StatusItems )
