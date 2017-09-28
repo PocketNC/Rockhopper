@@ -955,7 +955,7 @@ class CommandItem( object ):
 
         try:
            subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY);
-           subprocess.call(['git', 'fetch'], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['git', 'fetch', '--tags'], cwd=POCKETNC_DIRECTORY);
            all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
