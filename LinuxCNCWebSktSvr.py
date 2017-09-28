@@ -63,10 +63,13 @@ main_loop =tornado.ioloop.IOLoop.instance()
 
 linuxcnc_command = linuxcnc.command()
 
+# TODO - make this an env var or something?
+POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
+
 INI_FILENAME = ''
 INI_FILE_PATH = ''
 
-CONFIG_FILENAME = '/home/pocketnc/servers/Rockhopper/CLIENT_CONFIG.JSON'
+CONFIG_FILENAME = '%s/Rockhopper/CLIENT_CONFIG.JSON' % POCKETNC_DIRECTORY
 
 MAX_BACKPLOT_LINES=50000
 
@@ -501,16 +504,26 @@ class StatusItem( object ):
         return reply
 
     def get_current_version(self):
-        # TODO use libgit or shell out to terminal to get current git version: "git describe" in pocketnc directory
-        print "in get_current_version"
+        global POCKETNC_DIRECTORY
 
-        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": "v2.0.beta0" }
+        try:
+            cur_version = subprocess.check_output(['git', 'describe'], cwd=POCKETNC_DIRECTORY).strip();
+        except:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+
+        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": cur_version }
 
     def get_versions(self):
         # TODO use libgit or shell out to terminal to get current git all available versions: "git tag -l" in pocketnc directory
         print "in get_versions"
 
-        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": list(reversed(["v2.0.beta0", "v2.0.beta1", "v2.0.beta2", "v2.0.beta3"])) }
+        try:
+            all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+        except:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": all_versions }
 
     def list_gcode_files( self, directory ):
         file_list = []
@@ -752,13 +765,14 @@ class CommandItem( object ):
     HAL=1
     SYSTEM=2
     
-    def __init__( self, name=None, paramTypes=[], help='', command_type=MOTION ):
+    def __init__( self, name=None, paramTypes=[], help='', command_type=MOTION, isasync=False ):
         self.name = name
         self.paramTypes = paramTypes
         self.help = help
         for idx in xrange(0, len(paramTypes)):
             paramTypes[idx]['ordinal'] = str(idx)
         self.type = command_type
+        self.isasync = isasync
 
     # puts this object into the dictionary, with the key == self.name
     def register_in_dict( self, dictionary ):
@@ -925,10 +939,33 @@ class CommandItem( object ):
 
         return reply
 
+    def set_version(self, version):
+        global POCKETNC_DIRECTORY
+
+        try:
+           print subprocess.check_output(['git', 'checkout', 'tags/%s' % version], cwd=POCKETNC_DIRECTORY);
+           print subprocess.check_output(['git', 'submodule', 'update'], cwd=POCKETNC_DIRECTORY);
+        except:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+
+    def check_for_updates(self, commandDict):
+        global POCKETNC_DIRECTORY
+
+        try:
+           subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['git', 'fetch'], cwd=POCKETNC_DIRECTORY);
+           all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+        except:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions, 'id': 'versions' }
+
     def put_client_config( self, key, value ):
         global CONFIG_FILENAME
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
-        
+
         try:
             fo = open( CONFIG_FILENAME, 'r' )
             jsonobj = json.loads( fo.read() );
@@ -936,7 +973,10 @@ class CommandItem( object ):
         except:
             jsonobj = {}
         finally:
-            fo.close()
+            try:
+		fo.close()
+            except:
+                pass
         
         try:    
             fo = open( CONFIG_FILENAME, 'w' )
@@ -1151,6 +1191,10 @@ class CommandItem( object ):
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) );
+                elif (self.name == 'check_for_updates'):
+                    reply = self.check_for_updates(passed_command_dict)
+                elif (self.name == 'set_version'):
+                    reply = self.set_version( passed_command_dict.get('version', passed_command_dict['0']).strip() )
                 elif (self.name == 'add_user'):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
                 else:
@@ -1215,6 +1259,9 @@ CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptyp
 CommandItem( name='halfile',                 paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ],       help='Overwrite the specified file.  Parameter is a filename, then a string containing the new hal file contents.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear the last error condition.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
+CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
@@ -1596,7 +1643,17 @@ class LinuxCNCServerCommand( object ):
                 self.replyval['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
                 self.LinuxCNCCommandName = self.commandDict['name']
                 self.commanditem = self.CommandItems.get( self.LinuxCNCCommandName )
-                self.replyval = self.commanditem.execute( self.commandDict, self.linuxcnc_status_poller )
+                if self.commanditem.isasync:
+                    def runInThread(commanditem, commandDict, linuxcnc_status_poller, server_command_handler):
+                        reply = commanditem.execute(commandDict, linuxcnc_status_poller)
+                        json_reply = json.dumps(reply, cls=StatusItemEncoder)
+                        server_command_handler.write_message(json_reply)
+
+                    thread = threading.Thread(target=runInThread, args=(self.commanditem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
+                    thread.start()
+                    self.replyval = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+                else:
+                    self.replyval = self.commanditem.execute( self.commandDict, self.linuxcnc_status_poller )
             except:
                 logging.debug( 'PUT Command: ERROR'  )
                 
@@ -1929,6 +1986,7 @@ application = tornado.web.Application([
 # ********************************
 # ******************************** 
 def main():
+    global POCKETNC_DIRECTORY
     global INI_FILENAME
     global INI_FILE_PATH
     global userdict
@@ -1958,7 +2016,7 @@ def main():
         print "Parsing INI File Name"
 
     if len(args) < 1:
-        INI_FILENAME = "/home/pocketnc/linuxcnc/configs/ARM.BeagleBone.PocketNC/PocketNC.ini"
+        INI_FILENAME = "%s/Settings/PocketNC.ini" % POCKETNC_DIRECTORY
     else:
         INI_FILENAME = args[0]
     [INI_FILE_PATH, x] = os.path.split( INI_FILENAME )
