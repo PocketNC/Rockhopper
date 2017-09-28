@@ -943,12 +943,12 @@ class CommandItem( object ):
         global POCKETNC_DIRECTORY
 
         try:
-           print subprocess.check_output(['git', 'checkout', 'tags/%s' % version], cwd=POCKETNC_DIRECTORY);
-           print subprocess.check_output(['git', 'submodule', 'update'], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['git', 'checkout', 'tags/%s' % version], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['git', 'submodule', 'update'], cwd=POCKETNC_DIRECTORY);
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
-        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'refresh_ui' }
 
     def check_for_updates(self, commandDict):
         global POCKETNC_DIRECTORY
