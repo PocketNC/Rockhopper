@@ -1581,6 +1581,8 @@ class LinuxCNCServerCommand( object ):
     # Callbacks are made to the self.server_command_handler to write output to the websocket
     # The self.linuxcnc_status_poller is used to poll the linuxcnc status, which is used to watch status items and monitor for changes
     def execute( self ):
+        global main_loop
+
         self.commandID = self.commandDict.get('id','none')
         self.replyval = {}
         self.replyval['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND
@@ -1644,10 +1646,16 @@ class LinuxCNCServerCommand( object ):
                 self.LinuxCNCCommandName = self.commandDict['name']
                 self.commanditem = self.CommandItems.get( self.LinuxCNCCommandName )
                 if self.commanditem.isasync:
+                    def runOnIOLoop(server_command_handler, reply):
+                        # write_message isn't thread safe, so we have to run this in the IOLoop
+                        print "sending reply: %s" % reply
+                        server_command_handler.write_message(reply)
+                        
                     def runInThread(commanditem, commandDict, linuxcnc_status_poller, server_command_handler):
                         reply = commanditem.execute(commandDict, linuxcnc_status_poller)
                         json_reply = json.dumps(reply, cls=StatusItemEncoder)
-                        server_command_handler.write_message(json_reply)
+
+                        main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply);
 
                     thread = threading.Thread(target=runInThread, args=(self.commanditem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
                     thread.start()
