@@ -515,11 +515,21 @@ class StatusItem( object ):
         return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": cur_version }
 
     def get_versions(self):
-        # TODO use libgit or shell out to terminal to get current git all available versions: "git tag -l" in pocketnc directory
-        print "in get_versions"
-
         try:
             all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+
+# modified from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
+            def toIntOrString(text):
+                try:
+                    retval = int(text)
+                except ValueError:
+                    retval = text
+                return retval
+
+            def natural_keys(text):
+                return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
+
+            all_versions.sort(key=natural_keys)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
