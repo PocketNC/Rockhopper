@@ -1093,8 +1093,9 @@ class CommandItem( object ):
     
 
     def restart_linuxcnc_and_rockhopper( self ):
+        global POCKETNC_DIRECTORY
         try:
-            p = subprocess.Popen( ['/home/pocketnc/servers/Rockhopper/restartPocketNC.sh'] , stderr=subprocess.STDOUT )
+            p = subprocess.Popen( ['%s/restartPocketNC.sh' % POCKETNC_DIRECTORY] , stderr=subprocess.STDOUT )
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -1277,7 +1278,7 @@ CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'vers
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='restart',                paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='restart',          isasync=True, paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='startup',                 paramTypes=[ ],       help='Start LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # *****************************************************
