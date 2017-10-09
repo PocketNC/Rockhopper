@@ -52,6 +52,18 @@ from random import random
 from time import strftime
 from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
+
+# modified from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
+def toIntOrString(text):
+    try:
+        retval = int(text)
+    except ValueError:
+        retval = text
+    return retval
+
+def natural_keys(text):
+    return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
+
     
 UpdateStatusPollPeriodInMilliSeconds = 100
 UpdateHALPollPeriodInMilliSeconds = 500
@@ -517,18 +529,6 @@ class StatusItem( object ):
     def get_versions(self):
         try:
             all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
-
-# modified from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
-            def toIntOrString(text):
-                try:
-                    retval = int(text)
-                except ValueError:
-                    retval = text
-                return retval
-
-            def natural_keys(text):
-                return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
-
             all_versions.sort(key=natural_keys)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -965,7 +965,9 @@ class CommandItem( object ):
         try:
            subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY);
            subprocess.call(['git', 'fetch', '--tags'], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['git', 'fetch', '--prune', 'origin', '+refs/tags/*:refs/tags/*'], cwd=POCKETNC_DIRECTORY);
            all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+           all_versions.sort(key=natural_keys)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
