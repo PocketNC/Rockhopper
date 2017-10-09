@@ -943,8 +943,7 @@ class CommandItem( object ):
         global POCKETNC_DIRECTORY
 
         try:
-           subprocess.call(['git', 'checkout', 'tags/%s' % version], cwd=POCKETNC_DIRECTORY);
-           subprocess.call(['git', 'submodule', 'update'], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['./updateScript.sh', version], cwd=POCKETNC_DIRECTORY);
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
