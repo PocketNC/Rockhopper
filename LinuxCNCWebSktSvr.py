@@ -78,6 +78,9 @@ linuxcnc_command = linuxcnc.command()
 # TODO - make this an env var or something?
 POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
 
+INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/PocketNC.ini.default")
+CALIBRATION_OVERLAY_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/CalibrationOverlay.inc")
+
 INI_FILENAME = ''
 INI_FILE_PATH = ''
 
@@ -394,52 +397,11 @@ class StatusItem( object ):
     # called in a "get_config" command to read the config file and output it's values
     @staticmethod
     def get_ini_data( only_section=None, only_name=None ):
-        global INIFileDataTemplate
         global INI_FILENAME
-        global INI_FILE_PATH         
-        INIFileData = deepcopy(INIFileDataTemplate)
-       
-        sectionRegEx = re.compile( r"^\s*\[\s*(.+?)\s*\]" )
-        keyValRegEx = re.compile( r"^\s*(.+?)\s*=\s*(.+?)\s*$" )
-        try:
-            section = 'NONE'
-            comments = ''
-            idv = 1
-            with open( INI_FILENAME ) as file_:
-                for line in file_:
-                    if  line.lstrip().find('#') == 0 or line.lstrip().find(';') == 0:
-                        comments = comments + line[1:]
-                    else:
-                        mo = sectionRegEx.search( line )
-                        if mo:
-                            section = mo.group(1)
-                            hlp = ''
-                            try:
-                                if (section in ConfigHelp):
-                                    hlp = ConfigHelp[section]['']['help'].encode('ascii','replace')
-                            except:
-                                pass
-                            if (only_section is None or only_section == section):
-                                INIFileData['sections'][section] = { 'comment':comments, 'help':hlp }
-                            comments = '' 
-                        else:
-                            mo = keyValRegEx.search( line )
-                            if mo:
-                                hlp = ''
-                                default = ''
-                                try:
-                                    if (section in ConfigHelp):
-                                        if (mo.group(1) in ConfigHelp[section]):
-                                            hlp = ConfigHelp[section][mo.group(1)]['help'].encode('ascii','replace')
-                                            default = ConfigHelp[section][mo.group(1)]['default'].encode('ascii','replace')
-                                except:
-                                    pass
 
-                                if (only_section is None or (only_section == section and only_name == mo.group(1) )):
-                                    INIFileData['parameters'].append( { 'id':idv, 'values':{ 'section':section, 'name':mo.group(1), 'value':mo.group(2), 'comment':comments, 'help':hlp, 'default':default } } )
-                                comments = ''
-                                idv = idv + 1
-            reply = {'data':INIFileData,'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+        try:
+            ini_data = read_ini_data(INI_FILENAME, only_section, only_name)
+            reply = {'data': ini_data,'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         except Exception as ex:
             reply = {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND,'data':''}
 
@@ -764,6 +726,132 @@ StatusItem( name='running',                  coreLinuxCNCVariable=False, watchab
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
 StatusItem( name='axis',                     watchable=True, valtype='dict' ,   help='Axis Dictionary', isarray=True, arraylen=axis_length ).register_in_dict( StatusItems )
 
+# WARNING - this code exists in Settings/generateINI.py 
+# changes to this code, will likely need to be reflected there
+# TODO pull this code out into a shared location 
+def read_ini_data(ini_file, only_section=None, only_name=None):
+    global ConfigHelp
+
+    INIFileData = {
+        "parameters":[],
+        "sections":{}
+    }
+   
+    sectionRegEx = re.compile( r"^\s*\[\s*(.+?)\s*\]" )
+    keyValRegEx = re.compile( r"^\s*(.+?)\s*=\s*(.+?)\s*$" )
+
+    section = 'NONE'
+    comments = ''
+    idv = 1
+    with open( ini_file ) as file_:
+        for line in file_:
+            if  line.lstrip().find('#') == 0 or line.lstrip().find(';') == 0:
+                comments = comments + line[1:]
+            else:
+                mo = sectionRegEx.search( line )
+                if mo:
+                    section = mo.group(1)
+                    hlp = ''
+                    try:
+                        if (section in ConfigHelp):
+                            hlp = ConfigHelp[section]['']['help'].encode('ascii','replace')
+                    except:
+                        pass
+                    if (only_section is None or only_section == section):
+                        INIFileData['sections'][section] = { 'comment':comments, 'help':hlp }
+                    comments = '' 
+                else:
+                    mo = keyValRegEx.search( line )
+                    if mo:
+                        hlp = ''
+                        default = ''
+                        try:
+                            if (section in ConfigHelp):
+                                if (mo.group(1) in ConfigHelp[section]):
+                                    hlp = ConfigHelp[section][mo.group(1)]['help'].encode('ascii','replace')
+                                    default = ConfigHelp[section][mo.group(1)]['default'].encode('ascii','replace')
+                        except:
+                            pass
+
+                        if (only_section is None or (only_section == section and only_name == mo.group(1) )):
+                            INIFileData['parameters'].append( { 'id':idv, 'values':{ 'section':section, 'name':mo.group(1), 'value':mo.group(2), 'comment':comments, 'help':hlp, 'default':default } } )
+                        comments = ''
+                        idv = idv + 1
+    return INIFileData
+
+
+def ini_differences(defaults, save):
+    diff = {
+        'parameters': [],
+        'sections': {}
+    }
+    for param in save['parameters']:
+        section = param['values']['section']
+        name = param['values']['name']
+        value = param['values']['value']
+
+        for default_param in defaults['parameters']:
+            if name == default_param['values']['name'] and section == default_param['values']['section'] and value != default_param['values']['value']:
+                diff['parameters'].append(param)
+
+    for param in diff['parameters']:
+        diff['sections'][param['values']['section']] = save['sections'][param['values']['section']]
+
+    return diff
+
+def merge_ini_data(defaults, overlay):
+    merged = deepcopy(defaults)
+
+    for param in overlay['parameters']:
+        section = param['values']['section']
+        name = param['values']['name']
+        value = param['values']['value']
+
+        for default_param in merged['parameters']:
+            if name == default_param['values']['name'] and section == default_param['values']['section']:
+                print "Setting [%s](%s) to %s" % (section, name, value)
+                default_param['values']['value'] = value
+
+    return merged
+
+def write_ini_data(ini_data, ini_file):
+    print "Writing INI file..."
+    # construct the section list
+    sections = {}
+    sections_sorted = []
+    for line in ini_data['parameters']:
+        sections[line['values']['section']] = line['values']['section']
+    for section in sections:
+        sections_sorted.append( section )
+    sections_sorted = sorted(sections_sorted)
+
+    inifile = open(ini_file, 'w', 1)
+
+    for section in sections_sorted:
+        # write out the comments before the section header
+        if (section in ini_data['sections']):
+            commentlines = ini_data['sections'][section]['comment'].split('\n')
+            for c_line in commentlines:
+                if len(c_line) > 0:
+                    inifile.write( '#' + c_line + '\n' )
+
+        #write the section header
+        inifile.write( '[' + section + ']\n' )
+
+        #write the key/value pairs
+        for line in ini_data['parameters']:
+            if line['values']['section'] == section :
+                if (len(line['values']['comment']) > 0):
+                    commentlines = line['values']['comment'].split('\n')
+                    for c_line in commentlines:
+                        if len(c_line) > 0:
+                            inifile.write( '#' + c_line +'\n' )
+                if (len(line['values']['name']) > 0):
+                    inifile.write( line['values']['name'] + '=' + line['values']['value'] + '\n' )
+        inifile.write('\n\n')
+    inifile.close()
+
+## End WARNING
 
 # *****************************************************
 # Class to issue cnc commands
@@ -899,45 +987,15 @@ class CommandItem( object ):
 
     # called in a "put_config" command to write INI data to INI file, completely re-writing the file
     def put_ini_data( self, commandDict ):
-        global INI_FILENAME
-        global INI_FILE_PATH         
+        global INI_DEFAULTS_FILE
+        global CALIBRATION_OVERLAY_FILE
         reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
         try:
-            print "Writing INI file..."
-            # construct the section list
-            sections = {}
-            sections_sorted = []
-            for line in commandDict['data']['parameters']:
-                sections[line['values']['section']] = line['values']['section']
-            for section in sections:
-                sections_sorted.append( section )
-            sections_sorted = sorted(sections_sorted)
+            save_data = commandDict['data']
+            default_data = read_ini_data(INI_DEFAULTS_FILE)
 
-            inifile = open(INI_FILENAME, 'w', 1)
-
-            for section in sections_sorted:
-                # write out the comments before the section header
-                if (section in commandDict['data']['sections']):
-                    commentlines = commandDict['data']['sections'][section]['comment'].split('\n')
-                    for c_line in commentlines:
-                        if len(c_line) > 0:
-                            inifile.write( '#' + c_line + '\n' )
-
-                #write the section header
-                inifile.write( '[' + section + ']\n' )
-
-                #write the key/value pairs
-                for line in commandDict['data']['parameters']:
-                    if line['values']['section'] == section :
-                        if (len(line['values']['comment']) > 0):
-                            commentlines = line['values']['comment'].split('\n')
-                            for c_line in commentlines:
-                                if len(c_line) > 0:
-                                    inifile.write( '#' + c_line +'\n' )
-                        if (len(line['values']['name']) > 0):
-                            inifile.write( line['values']['name'] + '=' + line['values']['value'] + '\n' )
-                inifile.write('\n\n')
-            inifile.close()    
+            overlay = ini_differences(default_data, save_data)
+            write_ini_data(overlay, CALIBRATION_OVERLAY_FILE)
             reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
         except:
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
