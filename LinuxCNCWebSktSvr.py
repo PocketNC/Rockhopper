@@ -1074,12 +1074,12 @@ class CommandItem( object ):
             [h,f] = os.path.split( filename )
 
             [openFilePath,openFile] = os.path.split( linuxcnc_status_poller.linuxcnc_status.file )
-
+            
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
 
             openDefault = StatusItem.get_ini_data( only_section='DISPLAY', only_name='OPEN_FILE' )['data']['parameters'][0]['values']['value']
 
-            if os.path.samefile(openFilePath,path) and openFile == f:
+            if openFilePath and os.path.samefile(openFilePath,path) and openFile == f:
                 linuxcnc_command.program_open(openDefault)
             try:
                 os.remove(os.path.join(path, f))
