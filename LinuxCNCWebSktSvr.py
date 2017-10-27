@@ -987,6 +987,7 @@ class CommandItem( object ):
 
     # called in a "put_config" command to write INI data to INI file, completely re-writing the file
     def put_ini_data( self, commandDict ):
+        global INI_FILENAME
         global INI_DEFAULTS_FILE
         global CALIBRATION_OVERLAY_FILE
         reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -996,6 +997,7 @@ class CommandItem( object ):
 
             overlay = ini_differences(default_data, save_data)
             write_ini_data(overlay, CALIBRATION_OVERLAY_FILE)
+            write_ini_data(save_data, INI_FILENAME)
             reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
         except:
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
