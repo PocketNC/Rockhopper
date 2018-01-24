@@ -237,10 +237,26 @@ def merge_ini_data(defaults, overlay):
         name = param['values']['name']
         value = param['values']['value']
 
+        assigned = False
+        maxId = 0
         for default_param in merged['parameters']:
+            if maxId < default_param['id']:
+                maxId = default_param['id']
+
             if name == default_param['values']['name'] and section == default_param['values']['section']:
+                assigned = True
                 print "Setting [%s](%s) to %s" % (section, name, value)
                 default_param['values']['value'] = value
+
+        if not assigned:
+            print "Adding [%s](%s) as %s" % (section, name, value)
+            maxId += 1
+            if section not in merged['sections']:
+                merged['sections'][section] = overlay['sections'][section]
+            merged['parameters'].append({
+                'id': maxId,
+                'values': { 'comment': param['values']['comment'], 'default': param['values']['default'], 'help': param['values']['help'], 'name': name, 'section': section, 'value': value }
+            })
 
     return merged
 
