@@ -67,7 +67,7 @@ def natural_keys(text):
 
     
 UpdateStatusPollPeriodInMilliSeconds = 50
-UpdateHALPollPeriodInMilliSeconds = 50
+UpdateHALPollPeriodInMilliSeconds = 500
 UpdateErrorPollPeriodInMilliseconds = 50
 
 eps = float(0.000001)
