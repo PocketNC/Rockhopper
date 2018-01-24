@@ -296,3 +296,13 @@ def write_ini_data(ini_data, ini_file):
                     inifile.write( line['values']['name'] + '=' + line['values']['value'] + '\n' )
         inifile.write('\n\n')
     inifile.close()
+
+def remove_ini_data(data, remove):
+    trimmedData = deepcopy(data)
+
+    for param in remove:
+        section = param['section']
+        name = param['name']
+        trimmedData['parameters'] = [ p for p in trimmedData['parameters'] if (p['values']['name'] != name or p['values']['section'] != section) ]
+
+    return trimmedData
