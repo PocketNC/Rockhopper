@@ -1,6 +1,7 @@
 *.pyc
 static/halgraph.svg
 CLIENT_CONFIG.JSON
+CLIENT_CONFIG.JSON.save
 *.log
 
 
