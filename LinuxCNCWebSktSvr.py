@@ -82,6 +82,9 @@ POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
 INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/PocketNC.ini.default")
 CALIBRATION_OVERLAY_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/CalibrationOverlay.inc")
 
+A_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/a.comp");
+B_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/b.comp");
+
 INI_FILENAME = ''
 INI_FILE_PATH = ''
 
@@ -428,6 +431,48 @@ class StatusItem( object ):
                     break
         return found
 
+    def get_compensation( self ):
+        reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+
+        try:
+            data = {
+                'a': [],
+                'b': []
+            }
+            af = open(A_COMP_FILE, 'r')
+            a_data = af.read()
+
+            bf = open(B_COMP_FILE, 'r')
+            b_data = bf.read()
+
+            atriples = a_data.split()
+            btriples = b_data.split()
+
+            for ai in range(0, len(atriples), 3):
+                angle = float(atriples[ai])
+                forward = float(atriples[ai+1])
+                backward = float(atriples[ai+2])
+                data['a'].append([ angle, forward, backward ])
+
+            for bi in range(0, len(btriples), 3):
+                angle = float(btriples[bi])
+                forward = float(btriples[bi+1])
+                backward = float(btriples[bi+2])
+                data['b'].append([ angle, forward, backward ])
+
+            reply['data'] = data
+
+        except:
+            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        finally:
+          try:
+              af.close()
+              bf.close()
+          except:
+              pass
+
+        return reply
+
     def get_client_config( self ):
         global CONFIG_FILENAME
         reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
@@ -589,6 +634,8 @@ class StatusItem( object ):
                     ret = self.get_hal_file( command_dict.get("filename", '') )
                 elif (self.name == 'client_config'):
                     ret = self.get_client_config()
+                elif (self.name == 'compensation'):
+                    ret = self.get_compensation()
                 elif (self.name == 'users'):
                     ret = self.get_users()
                 elif (self.name == 'error'):
@@ -720,6 +767,8 @@ StatusItem( name='halgraph',                 coreLinuxCNCVariable=False, watchab
 StatusItem( name='ini_file_name',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='INI file to use for next LinuxCNC start.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='client_config',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Client Configuration.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='users',                    coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Web server user list.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
+
+StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchable=False,  valtype='dict',  help='a and b axis compensation', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
@@ -908,6 +957,43 @@ class CommandItem( object ):
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions, 'id': 'versions' }
+
+    def put_compensation(self, data):
+        reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+
+        a = data['data']['a']
+        b = data['data']['b']
+
+        if len(a) > 256:
+            reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+            reply['error'] = "Too many entries in A compensation table. Attempting to set %s entries. Compensation tables can only have 256 entries." % len(a)
+        elif len(b) > 256:
+            reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+            reply['error'] = "Too many entries in B compensation table. Attempting to set %s entries. Compensation tables can only have 256 entries." % len(b)
+        else:
+            try:
+                af = open(A_COMP_FILE, 'w')
+                bf = open(B_COMP_FILE, 'w')
+
+                for row in a:
+                    af.write(" ".join([ str(v) for v in row ]))
+                    af.write("\n")
+
+                for row in b:
+                    bf.write(" ".join([ str(v) for v in row ]))
+                    bf.write("\n")
+
+            except Exception as e:
+                reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+                print e
+            finally:
+              try:
+                  af.close()
+                  bf.close()
+              except:
+                  pass
+
+        return reply
 
     def put_client_config( self, key, value ):
         global CONFIG_FILENAME
@@ -1139,6 +1225,8 @@ class CommandItem( object ):
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) );
+                elif (self.name == 'set_compensation'):
+                    reply = self.put_compensation(passed_command_dict);
                 elif (self.name == 'check_for_updates'):
                     reply = self.check_for_updates(passed_command_dict)
                 elif (self.name == 'set_version'):
@@ -1207,6 +1295,7 @@ CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptyp
 CommandItem( name='halfile',                 paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ],       help='Overwrite the specified file.  Parameter is a filename, then a string containing the new hal file contents.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear the last error condition.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='set_compensation',      paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],     help='Save a and b axis compensation tables', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
