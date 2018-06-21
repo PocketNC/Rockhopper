@@ -79,6 +79,9 @@ linuxcnc_command = linuxcnc.command()
 # TODO - make this an env var or something?
 POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
 
+sys.path.insert(0, os.path.join(POCKETNC_DIRECTORY, "Settings"));
+import version as boardRevision
+
 INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/PocketNC.ini.default")
 CALIBRATION_OVERLAY_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/CalibrationOverlay.inc")
 
@@ -638,6 +641,8 @@ class StatusItem( object ):
                     ret = self.get_compensation()
                 elif (self.name == 'users'):
                     ret = self.get_users()
+                elif (self.name == 'board_revision'):
+                    ret['data'] = boardRevision.getVersion()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
             else:
@@ -702,6 +707,7 @@ StatusItem( name='file',                     watchable=True, valtype='string' , 
 StatusItem( name='file_content',             coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='currently executing gcode file contents' ).register_in_dict( StatusItems )
 StatusItem( name='versions',                 requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string[]' , help='available PocketNC versions (list of tags available in git repository)').register_in_dict( StatusItems )
 StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='current PocketNC version (current tag in git repository)' ).register_in_dict( StatusItems )
+StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
 StatusItem( name='flood',                    watchable=True, valtype='int' ,    help='flood enabled' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_index',                watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_offset',               watchable=True, valtype='float[]', help='offset of the currently active coordinate system, a pose' ).register_in_dict( StatusItems )
