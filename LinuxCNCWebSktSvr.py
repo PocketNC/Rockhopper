@@ -82,7 +82,9 @@ POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
 sys.path.insert(0, os.path.join(POCKETNC_DIRECTORY, "Settings"));
 import version as boardRevision
 
-INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/PocketNC.ini.default")
+BOARD_REVISION = boardRevision.getVersion()
+
+INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/versions/%s/PocketNC.ini" % BOARD_REVISION)
 CALIBRATION_OVERLAY_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/CalibrationOverlay.inc")
 
 A_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/a.comp");
@@ -642,7 +644,7 @@ class StatusItem( object ):
                 elif (self.name == 'users'):
                     ret = self.get_users()
                 elif (self.name == 'board_revision'):
-                    ret['data'] = boardRevision.getVersion()
+                    ret['data'] = BOARD_REVISION
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
             else:
