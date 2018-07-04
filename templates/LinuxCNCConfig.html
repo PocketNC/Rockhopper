@@ -32,6 +32,55 @@
 <p>
     A list of all available commands is available in the <a href="http://www.linuxcnc.org/docs/devel/html/config/ini_config.html" target="_blank">linuxcnc INI Configuration Documentation</a>.
 </p>
+<div>
+
+<h3>Calibration Upload Form</h3>
+<p>Upload a zip file with an a.comp, b.comp and CalibrationOverlay.inc file.</p>
+
+<form id="calibrationUploadForm" method="POST" action="/upload/calibration" enctype="multipart/form-data">
+<input type="file" name="calibration_data">
+<button>Upload</button>
+</form>
+
+<div id="uploadMsg"></div>
+
+<script>
+  function SubmitCalibrationFile(e) {
+    console.log("in SubmitCalibrationFile", e);
+    var form = e.target;
+
+    var request = new XMLHttpRequest();
+    var data = new FormData(form);
+
+    var msgElement = document.getElementById("uploadMsg");
+
+    request.addEventListener("load", function(e) {
+      console.log(e.target.responseText);
+      if(e.target.responseText == "SUCCESS") {
+        uploadMsg.innerHTML = "<span style='color: green'>Success!</span>";
+      } else {
+        uploadMsg.innerHTML = "<span style='color: red'>" + e.target.responseText + "</span>";
+      }
+    });
+
+    request.addEventListener("error", function(e) {
+        uploadMsg.innerHTML = "<span style='color: red'>" + e + "</span>";
+    });
+
+    request.open("POST", "/upload/calibration");
+    request.send(data);
+  }
+
+  var form = document.getElementById("calibrationUploadForm");
+  form.addEventListener("submit", function(e) {
+    e.preventDefault();
+    SubmitCalibrationFile(e);
+  });
+</script>
+<br/>
+<br/>
+<br/>
+</div>
 
         <div id="top_button_bar">
         <button type="button" id="add_new_section_but" value="Add_New_Section" onclick="ConfigAddSection();">Add New Section</button>

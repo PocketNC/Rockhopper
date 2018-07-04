@@ -17,6 +17,7 @@
 # *****************************************************
 #
 # Copyright 2012, 2013 Machinery Science, LLC
+# Copyright 2018 Pocket NC, Inc.
 #
 import sys
 import os
@@ -48,6 +49,9 @@ import fcntl
 import signal
 import select
 import glob
+import shutil
+import tempfile
+import zipfile
 from random import random
 from time import strftime
 from optparse import OptionParser
@@ -64,7 +68,6 @@ def toIntOrString(text):
 
 def natural_keys(text):
     return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
-
     
 UpdateStatusPollPeriodInMilliSeconds = 50
 UpdateHALPollPeriodInMilliSeconds = 500
@@ -77,18 +80,19 @@ main_loop =tornado.ioloop.IOLoop.instance()
 linuxcnc_command = linuxcnc.command()
 
 # TODO - make this an env var or something?
-POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc";
+POCKETNC_DIRECTORY = "/home/pocketnc/pocketnc"
 
-sys.path.insert(0, os.path.join(POCKETNC_DIRECTORY, "Settings"));
+sys.path.insert(0, os.path.join(POCKETNC_DIRECTORY, "Settings"))
 import version as boardRevision
 
 BOARD_REVISION = boardRevision.getVersion()
 
 INI_DEFAULTS_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/versions/%s/PocketNC.ini" % BOARD_REVISION)
+SETTINGS_PATH = os.path.join(POCKETNC_DIRECTORY, "Settings")
 CALIBRATION_OVERLAY_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/CalibrationOverlay.inc")
 
-A_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/a.comp");
-B_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/b.comp");
+A_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/a.comp")
+B_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/b.comp")
 
 INI_FILENAME = ''
 INI_FILE_PATH = ''
@@ -350,9 +354,9 @@ class StatusItem( object ):
                     lastBackplotData = gr.to_json(maxlines=MAX_BACKPLOT_LINES)
                     lastBackplotFilename = filename
                 reply = {'data':lastBackplotData, 'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
-            except ex:
+            except Exception as ex:
                 reply = {'data':'','code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-                print ex
+                print "Error in back plot", ex
             BackplotLock.release()
 
             async_lock.acquire()
@@ -366,8 +370,8 @@ class StatusItem( object ):
         if (lastBackplotFilename == linuxcnc_status_poller.linuxcnc_status.file):
             return {'data':lastBackplotData, 'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         
-        thread = threading.Thread(target=do_backplot, args=(self, async_buffer, async_lock, linuxcnc_status_poller.linuxcnc_status.file))
-        thread.start()
+        #thread = threading.Thread(target=do_backplot, args=(self, async_buffer, async_lock, linuxcnc_status_poller.linuxcnc_status.file))
+        #thread.start()
         return { 'code':LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data':'' } 
 
     def backplot( self ):
@@ -378,7 +382,7 @@ class StatusItem( object ):
         try:
             gr = GCodeReader.GCodeRender( INI_FILENAME )
             gr.load()
-            reply = gr.to_json(maxlines=MAX_BACKPLOT_LINES);
+            reply = gr.to_json(maxlines=MAX_BACKPLOT_LINES)
         except ex:
             print ex
         BackplotLock.release()
@@ -532,7 +536,7 @@ class StatusItem( object ):
         global POCKETNC_DIRECTORY
 
         try:
-            cur_version = subprocess.check_output(['git', 'describe'], cwd=POCKETNC_DIRECTORY).strip();
+            cur_version = subprocess.check_output(['git', 'describe'], cwd=POCKETNC_DIRECTORY).strip()
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
@@ -541,7 +545,7 @@ class StatusItem( object ):
 
     def get_versions(self):
         try:
-            all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+            all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split()
             all_versions.sort(key=natural_keys)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -567,6 +571,26 @@ class StatusItem( object ):
         global userdict
         return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":userdict.keys() }
 
+    def get_calibration_data( self ):
+        ret = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":"" }
+        try:
+          tmpDir = tempfile.mkdtemp()
+
+          shutil.copy(CALIBRATION_OVERLAY_FILE, tmpDir)
+          shutil.copy(A_COMP_FILE, tmpDir)
+          shutil.copy(B_COMP_FILE, tmpDir)
+
+          shutil.make_archive(os.path.join(application_path,"static/calibration"), "zip", tmpDir)
+
+          ret['data'] = 'static/calibration.zip'
+
+          shutil.rmtree(tmpDir)
+        except Exception as ex:
+          print "exception", ex
+          ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+          ret['data'] = ''
+        return ret
+      
     def get_halgraph( self ):
         ret = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":"" }
         try:
@@ -624,13 +648,15 @@ class StatusItem( object ):
                 elif (self.name == 'file_content'):
                     ret['data'] = self.read_gcode_file(linuxcnc_status_poller.linuxcnc_status.file)
                 elif (self.name == 'versions'):
-                    ret = self.get_versions();
+                    ret = self.get_versions()
                 elif (self.name == 'current_version'):
-                    ret = self.get_current_version();
+                    ret = self.get_current_version()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
+                elif (self.name == 'calibration_data'):
+                    ret = self.get_calibration_data()
                 elif (self.name == 'config'):
                     ret = StatusItem.get_ini_data()
                 elif (self.name == 'config_item'):
@@ -772,6 +798,7 @@ StatusItem( name='config',                   coreLinuxCNCVariable=False, watchab
 StatusItem( name='config_item',              coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Specific section/name from the config file.  Pass in section=??? and name=???.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
 StatusItem( name='halfile',                  coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Contents of a hal file.  Pass in filename=??? to specify the hal file name', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='halgraph',                 coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"' ).register_in_dict( StatusItems )
+StatusItem( name='calibration_data',         coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Filename of the calibration.zip file generated from the current machine specific calibration data.' ).register_in_dict( StatusItems )
 StatusItem( name='ini_file_name',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='INI file to use for next LinuxCNC start.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='client_config',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Client Configuration.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='users',                    coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Web server user list.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
@@ -811,6 +838,7 @@ class CommandItem( object ):
 
     def temp_set_ini_data( self, commandDict, linuxcnc_status_poller ):
         global HAL_INTERFACE
+        global linuxcnc_command
 
         reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
@@ -829,7 +857,8 @@ class CommandItem( object ):
                 'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.00.maxaccel',
                 'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.00.maxvel',
                 'STEPLEN': 'hal_pru_generic.stepgen.00.steplen',
-                'STEPSPACE': 'hal_pru_generic.stepgen.00.stepspace'
+                'STEPSPACE': 'hal_pru_generic.stepgen.00.stepspace',
+                'HOME_OFFSET': 'axis.0.home-offset'
             },
             'AXIS_1': {
                 'BACKLASH': 'ini.1.backlash',
@@ -845,7 +874,8 @@ class CommandItem( object ):
                 'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.01.maxaccel',
                 'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.01.maxvel',
                 'STEPLEN': 'hal_pru_generic.stepgen.01.steplen',
-                'STEPSPACE': 'hal_pru_generic.stepgen.01.stepspace'
+                'STEPSPACE': 'hal_pru_generic.stepgen.01.stepspace',
+                'HOME_OFFSET': 'axis.1.home-offset'
             },
             'AXIS_2': {
                 'BACKLASH': 'ini.2.backlash',
@@ -861,7 +891,8 @@ class CommandItem( object ):
                 'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.02.maxaccel',
                 'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.02.maxvel',
                 'STEPLEN': 'hal_pru_generic.stepgen.02.steplen',
-                'STEPSPACE': 'hal_pru_generic.stepgen.02.stepspace'
+                'STEPSPACE': 'hal_pru_generic.stepgen.02.stepspace',
+                'HOME_OFFSET': 'axis.2.home-offset'
             },
             'AXIS_3': {
                 'BACKLASH': 'ini.3.backlash',
@@ -877,7 +908,8 @@ class CommandItem( object ):
                 'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.03.maxaccel',
                 'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.03.maxvel',
                 'STEPLEN': 'hal_pru_generic.stepgen.03.steplen',
-                'STEPSPACE': 'hal_pru_generic.stepgen.03.stepspace'
+                'STEPSPACE': 'hal_pru_generic.stepgen.03.stepspace',
+                'HOME_OFFSET': 'axis.3.home-offset'
             },
             'AXIS_4': {
                 'BACKLASH': 'ini.4.backlash',
@@ -893,7 +925,8 @@ class CommandItem( object ):
                 'STEPGEN_MAX_ACC': 'hal_pru_generic.stepgen.04.maxaccel',
                 'STEPGEN_MAX_VEL': 'hal_pru_generic.stepgen.04.maxvel',
                 'STEPLEN': 'hal_pru_generic.stepgen.04.steplen',
-                'STEPSPACE': 'hal_pru_generic.stepgen.04.stepspace'
+                'STEPSPACE': 'hal_pru_generic.stepgen.04.stepspace',
+                'HOME_OFFSET': 'axis.4.home-offset'
             }
         }
 
@@ -902,15 +935,23 @@ class CommandItem( object ):
         if section:
             pin = section.get(data['name'])
             if pin:
-                linuxcnc_status_poller.hal_mutex.acquire()
+                was_on = False
+                if linuxcnc_status_poller.linuxcnc_status.task_state == linuxcnc.STATE_ON:
+                    was_on = True
+                    linuxcnc_command.state(linuxcnc.STATE_OFF)
+                    while linuxcnc_status_poller.linuxcnc_status.task_state == linuxcnc.STATE_ON:
+                        print "waiting for power to turn off..."
+                        time.sleep(.1)
+                        linuxcnc_status_poller.poll_update()
+
                 try:
                     HAL_INTERFACE.set_p(pin, data['value'])
+                    if was_on:
+                        linuxcnc_command.state(linuxcnc.STATE_ON)
                     reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
-                except ex:
+                except Exception as ex:
                     print "Error setting hal pin"
                     print ex
-                finally:
-                    linuxcnc_status_poller.hal_mutex.release()
             else:
                 print "No pin found for variable %s in section %s" % (data['name'], data['section'])
         else:
@@ -933,6 +974,7 @@ class CommandItem( object ):
             write_ini_data(save_data, INI_FILENAME)
             reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
         except:
+            print "Unexpected error:", sys.exc_info()[0]
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         finally:
             try:
@@ -946,7 +988,7 @@ class CommandItem( object ):
         global POCKETNC_DIRECTORY
 
         try:
-           subprocess.call(['./updateScript.sh', version], cwd=POCKETNC_DIRECTORY);
+           subprocess.call(['./updateScript.sh', version], cwd=POCKETNC_DIRECTORY)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
@@ -956,10 +998,10 @@ class CommandItem( object ):
         global POCKETNC_DIRECTORY
 
         try:
-           subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY);
-           subprocess.call(['git', 'fetch', '--tags'], cwd=POCKETNC_DIRECTORY);
-           subprocess.call(['git', 'fetch', '--prune', 'origin', '+refs/tags/*:refs/tags/*'], cwd=POCKETNC_DIRECTORY);
-           all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split();
+           subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY)
+           subprocess.call(['git', 'fetch', '--tags'], cwd=POCKETNC_DIRECTORY)
+           subprocess.call(['git', 'fetch', '--prune', 'origin', '+refs/tags/*:refs/tags/*'], cwd=POCKETNC_DIRECTORY)
+           all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split()
            all_versions.sort(key=natural_keys)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -1009,8 +1051,8 @@ class CommandItem( object ):
 
         try:
             fo = open( CONFIG_FILENAME, 'r' )
-            jsonobj = json.loads( fo.read() );
-            jsonobj[key] = value;
+            jsonobj = json.loads( fo.read() )
+            jsonobj[key] = value
         except:
             jsonobj = {}
         finally:
@@ -1232,9 +1274,9 @@ class CommandItem( object ):
                 elif (self.name == 'program_delete'):
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
-                    reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) );
+                    reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) )
                 elif (self.name == 'set_compensation'):
-                    reply = self.put_compensation(passed_command_dict);
+                    reply = self.put_compensation(passed_command_dict)
                 elif (self.name == 'check_for_updates'):
                     reply = self.check_for_updates(passed_command_dict)
                 elif (self.name == 'set_version'):
@@ -1481,7 +1523,7 @@ class LinuxCNCServerCommand( object ):
                 else:
                     if ( self.statusitem.isarray ):
                         self.item_index = self.commandDict['index']
-                        self.replyval['index'] = self.item_index;
+                        self.replyval['index'] = self.item_index
 
                     if (self.statusitem.isasync):
                         self.linuxcnc_status_poller.add_observer( self.monitor_async )
@@ -1501,7 +1543,7 @@ class LinuxCNCServerCommand( object ):
                 else:
                     if ( self.statusitem.isarray ):
                         self.item_index = self.commandDict['index']
-                        self.replyval['index'] = self.item_index;
+                        self.replyval['index'] = self.item_index
                     self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
                     if (self.replyval['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK ):
                         self.linuxcnc_status_poller.add_observer( self.on_new_poll )
@@ -1539,7 +1581,7 @@ class LinuxCNCServerCommand( object ):
                         reply = commanditem.execute(commandDict, linuxcnc_status_poller)
                         json_reply = json.dumps(reply, cls=StatusItemEncoder)
 
-                        main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply);
+                        main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply)
 
                     thread = threading.Thread(target=runInThread, args=(self.commanditem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
                     thread.start()
@@ -1751,6 +1793,46 @@ class PollHandler(tornado.web.RequestHandler):
             self.write(LinuxCNCServerCommand( StatusItems, CommandItems, self, LINUXCNCSTATUS, command_dict=command_dict ).execute())
         self.finish()
 
+# *****************************************************  
+@require_basic_auth
+class CalibrationUpload(tornado.web.RequestHandler):
+  def get(self):
+    print "in get"
+    self.render( 'LinuxCNCSandbox.html' )
+
+  def post(self):
+    fileinfo = self.request.files['calibration_data'][0]
+    try:
+      tmp = tempfile.NamedTemporaryFile(delete=False)
+      tmp.file.write(fileinfo['body'])
+      tmp.file.close()
+
+      tmpDir = tempfile.mkdtemp()
+          
+      zip_ref = zipfile.ZipFile(tmp.name, 'r')
+      zip_ref.extractall(tmpDir)
+      zip_ref.close()
+
+      acompFile = os.path.join(tmpDir, "a.comp")
+      bcompFile = os.path.join(tmpDir, "b.comp")
+      calibrationFile = os.path.join(tmpDir, "CalibrationOverlay.inc")
+
+      if os.path.isfile(acompFile) and os.path.isfile(bcompFile) and os.path.isfile(calibrationFile):
+        shutil.copy(acompFile, SETTINGS_PATH)
+        shutil.copy(bcompFile, SETTINGS_PATH)
+        shutil.copy(calibrationFile, SETTINGS_PATH)
+        self.write("SUCCESS")
+      else:
+        self.write("ERROR: zip file must constain a.comp, b.comp and CalibrationOverlay.inc.")
+    except Exception as ex:
+      self.write("ERROR: " + str(ex))
+    finally:
+      if os.path.isfile(tmp.name):
+        os.remove(tmp.name)
+      if os.path.isdir(tmpDir):
+        shutil.rmtree(tmpDir)
+      
+
 
 # *****************************************************  
 @require_basic_auth
@@ -1866,6 +1948,7 @@ application = tornado.web.Application([
     (r"/polljson/(.*)", PollHandlerJSON, {} ),
     (r"/query/(.*)", PollHeaderLogin, {} ),
     (r"/websocket/(.*)", LinuxCNCCommandWebSocketHandler, {} ),
+    (r"/upload/calibration", CalibrationUpload, {})
     ],
     debug=True,
     template_path=os.path.join(application_path, "templates"),
