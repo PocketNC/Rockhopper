@@ -716,6 +716,12 @@ function ConfigSocketMessageHandler(evt)
 
         // put section menus on the left side
         ConfigUpdateSectionMenus();
+    } else if(result["id"] === "calibration") {
+        var a = document.createElement('a');
+        var now = new Date();
+        a.download = "calibration" + document.getElementById("calibrationSerialNumber").value + "_" + now.getFullYear() + "-" + ("" + (now.getMonth()+1)).padStart(2, "0") + "-" + ("" + now.getDate()).padStart(2, "0") + ".zip";
+        a.href = result["data"];
+        a.click();
     } else {
         alert("Last command reply: " + result["code"].substring(1));
     }
@@ -724,6 +730,11 @@ function ConfigSocketMessageHandler(evt)
     var outputcell = document.getElementById("Command_Reply");
     outputcell.innerHTML = "Last Command Reply: " + result["code"];
 }
+
+function DownloadCalibration() {
+    ws.send( JSON.stringify({ "id":"calibration", "command":"get", "name":"calibration_data" }) ) ;
+}
+  
 
 
 // ********************************

@@ -1,5 +1,6 @@
 *.pyc
-static/halgraph.svg
+/static/halgraph.svg
+/static/calibration.zip
 CLIENT_CONFIG.JSON
 CLIENT_CONFIG.JSON.save
 *.log

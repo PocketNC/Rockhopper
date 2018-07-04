@@ -35,6 +35,7 @@
 <div>
 
 <h3>Calibration Upload Form</h3>
+Serial Number <input type="text" id="calibrationSerialNumber" value=""><button onclick="DownloadCalibration()">Download Machine Specific Calibration</button>
 <p>Upload a zip file with an a.comp, b.comp and CalibrationOverlay.inc file.</p>
 
 <form id="calibrationUploadForm" method="POST" action="/upload/calibration" enctype="multipart/form-data">
