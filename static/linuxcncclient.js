@@ -734,7 +734,6 @@ function ConfigSocketMessageHandler(evt)
 function DownloadCalibration() {
     ws.send( JSON.stringify({ "id":"calibration", "command":"get", "name":"calibration_data" }) ) ;
 }
-  
 
 
 // ********************************
@@ -1020,93 +1019,147 @@ function CompensationSocketOpen()
     ws.send( JSON.stringify({ "id":"COMPENSATION", "command":"get", "name":"compensation" }) ) ;
 }
 
+function addCompensationLine(parent, afterNode, angle, forward, reverse) {
+  var div = document.createElement('div');
+  var angleElement = document.createElement('input');
+  angleElement.type = "text";
+  angleElement.value = angle;
+
+  div.appendChild(angleElement);
+
+  var forwardElement = document.createElement('input');
+  forwardElement.type = "text";
+  forwardElement.value = forward;
+
+  div.appendChild(forwardElement);
+
+  var reverseElement = document.createElement('input');
+  reverseElement.type = "text";
+  reverseElement.value = reverse;
+
+  div.appendChild(reverseElement);
+
+  var removeButton = document.createElement('button');
+  removeButton.innerHTML = "x";
+  removeButton.addEventListener("click", function(e) {
+      parent.removeChild(e.target.parentElement);
+  });
+
+  div.appendChild(removeButton);
+
+  var addButton = document.createElement('button');
+  addButton.innerHTML = "+";
+  addButton.addEventListener("click", function(e) {
+      addCompensationLine(parent, e.target.parentElement, "", "", "");
+  });
+  div.appendChild(addButton);
+
+  parent.insertBefore(div, afterNode ? afterNode.nextSibling : null);
+}
+
+function updateCompensationUI(a, b) {
+  var acompElement = document.getElementById("acomp");
+  acompElement.innerHTML = "";
+  for(var i = 0; i < a.length; i++) {
+      var angle = a[i][0];
+      var forward = a[i][1];
+      var reverse = a[i][2];
+
+      addCompensationLine(acompElement, null, angle, forward, reverse);
+  }
+
+  var bcompElement = document.getElementById("bcomp");
+  bcompElement.innerHTML = "";
+
+  for(var i = 0; i < b.length; i++) {
+      var angle = b[i][0];
+      var forward = b[i][1];
+      var reverse = b[i][2];
+
+      if(angle >= 0 && angle < 360) {
+        addCompensationLine(bcompElement, null, angle, forward, reverse);
+      }
+  }
+}
+
 function CompensationSocketMessageHandler(evt)
 {
     var result = JSON.parse(evt.data);
 
-    var a_angles = {
-        0: true,
-        45: true,
-        90: true,
-        135: true
-    };
-
-    var b_angles = {
-        0: true,
-        90: true,
-        180: true,
-        270: true
-    };
-
     console.log(result);
     if(result.id == "COMPENSATION") {
-        for(var i = 0; i < result.data.a.length; i++) {
-            var angle = result.data.a[i][0];
-            if(a_angles[angle]) {
-                document.getElementById("a_comp_for" + angle).value = result.data.a[i][1];
-                document.getElementById("a_comp_rev" + angle).value = result.data.a[i][2];
-            }
-        }
-        for(var i = 0; i < result.data.b.length; i++) {
-            var angle = result.data.b[i][0];
-            if(b_angles[angle]) {
-                document.getElementById("b_comp_for" + angle).value = result.data.b[i][1];
-                document.getElementById("b_comp_rev" + angle).value = result.data.b[i][2];
-            }
-        }
+      updateCompensationUI(result.data.a, result.data.b);
+    } else if(result.id == "SET_COMPENSATION" && result.code == "?OK") {
+      document.getElementById("Command_Reply").innerHTML = 'Compensation tables saved!';
+    } else if(result.id == "SET_COMPENSATION" && result.error) {
+      document.getElementById("Command_Reply").innerHTML = '<span style="color: red">' +result.error + '</span>';
     }
 }
 
+function getCompensationData() {
+  var acompElement = document.getElementById("acomp");
+  var bcompElement = document.getElementById("bcomp");
+
+  var aData = [];
+  var bData = [];
+
+  for(var i = 0; i < acompElement.children.length; i++) {
+    var div = acompElement.children[i];
+    var angle = parseFloat(div.children[0].value);
+    var forward = parseFloat(div.children[1].value);
+    var reverse = parseFloat(div.children[2].value);
+
+    aData.push([ angle, forward, reverse ]);
+  }
+
+  for(var i = 0; i < bcompElement.children.length; i++) {
+    var div = bcompElement.children[i];
+    var angle = parseFloat(div.children[0].value);
+    var forward = parseFloat(div.children[1].value);
+    var reverse = parseFloat(div.children[2].value);
+
+    bData.push([ angle, forward, reverse ]);
+  }
+
+  return {
+    a: aData,
+    b: bData
+  };
+}
+
 function SaveCompensation() {
-    var a_for0 = parseFloat(document.getElementById("a_comp_for0").value);
-    var a_for45 = parseFloat(document.getElementById("a_comp_for45").value);
-    var a_for90 = parseFloat(document.getElementById("a_comp_for90").value);
-    var a_for135 = parseFloat(document.getElementById("a_comp_for135").value);
+    var data = getCompensationData();
 
-    var a_rev0 = parseFloat(document.getElementById("a_comp_rev0").value);
-    var a_rev45 = parseFloat(document.getElementById("a_comp_rev45").value);
-    var a_rev90 = parseFloat(document.getElementById("a_comp_rev90").value);
-    var a_rev135 = parseFloat(document.getElementById("a_comp_rev135").value);
+    var bData = data.b;
+    data.b = [];
 
-    var b_for0 = parseFloat(document.getElementById("b_comp_for0").value);
-    var b_for90 = parseFloat(document.getElementById("b_comp_for90").value);
-    var b_for180 = parseFloat(document.getElementById("b_comp_for180").value);
-    var b_for270 = parseFloat(document.getElementById("b_comp_for270").value);
-
-    var b_rev0 = parseFloat(document.getElementById("b_comp_rev0").value);
-    var b_rev90 = parseFloat(document.getElementById("b_comp_rev90").value);
-    var b_rev180 = parseFloat(document.getElementById("b_comp_rev180").value);
-    var b_rev270 = parseFloat(document.getElementById("b_comp_rev270").value);
-
-    console.log("a for comp", a_for0,a_for45,a_for90,a_for135);
-    console.log("a rev comp", a_rev0,a_rev45,a_rev90,a_rev135);
-
-    console.log("b for comp", b_for0,b_for90,b_for180,b_for270);
-    console.log("b rev comp", b_rev0,b_rev90,b_rev180,b_rev270);
-
-    var data = {
-        a: [ 
-             [0, a_for0, a_rev0 ],
-             [45, a_for45, a_rev45 ],
-             [90, a_for90, a_rev90 ],
-             [135, a_for135, a_rev135 ],
-        ],
-        b: [
-        ]
-    };
-
-    for(var angle = 0; angle <= 9999-360; angle += 360) {
-        data.b.push([angle+0, b_for0, b_rev0 ]);
-        data.b.push([angle+90, b_for90, b_rev90 ]);
-        data.b.push([angle+180, b_for180, b_rev180 ]);
-        data.b.push([angle+270, b_for270, b_rev270 ]);
+    var revolutions = 0;
+    var i = 0;
+    var b = bData[0][0];
+    while(b < 9999) {
+      data.b.push([ b , bData[i][1], bData[i][2] ]);
+      i++;
+      if(i === bData.length) {
+        revolutions++;
+        i = 0;
+      }
+      b = bData[i][0]+revolutions*360
     }
-    for(var angle = 0; angle >= -9999+360; angle -= 360) {
-        if(angle != 0) data.b.unshift([angle-0, b_for0, b_rev0 ]);
-        data.b.unshift([angle-90, b_for270, b_rev270 ]);
-        data.b.unshift([angle-180, b_for180, b_rev180 ]);
-        data.b.unshift([angle-270, b_for90, b_rev90 ]);
+    data.b.push([ b , bData[i][1], bData[i][2] ]);
+
+    revolutions = 1;
+    i = bData.length-1;
+    b = bData[i][0]-360;
+    while(b > -9999) {
+      data.b.unshift([ b , bData[i][1], bData[i][2] ]);
+      i--;
+      if(i === -1) {
+        revolutions++;
+        i = bData.length-1;
+      }
+      b = bData[i][0]-revolutions*360;
     }
+    data.b.unshift([ b , bData[i][1], bData[i][2] ]);
 
     ws.send( JSON.stringify({ "id": "SET_COMPENSATION", "command": "put", "name":"set_compensation", "data": data }));
 }
