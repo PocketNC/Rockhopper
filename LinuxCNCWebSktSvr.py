@@ -1179,6 +1179,13 @@ class CommandItem( object ):
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+    def shutdown_computer( self ):
+        try:
+            p = subprocess.Popen( [ os.path.join(application_path, 'shutdown_computer.sh') ] , stderr=subprocess.STDOUT )
+            return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        except:
+            return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
         
     def start_linuxcnc( self ):
         global INI_FILENAME
@@ -1265,6 +1272,8 @@ class CommandItem( object ):
                     reply = self.put_hal_file( filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict.get['1']) )
                 elif (self.name == 'shutdown'):
                     reply = self.shutdown_linuxcnc()
+                elif (self.name == 'shutdown_computer'):
+                    reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
                     reply = self.restart_linuxcnc_and_rockhopper()
                 elif (self.name == 'startup'):
@@ -1352,6 +1361,7 @@ CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'vers
 
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
+CommandItem( name='shutdown_computer',                paramTypes=[ ],       help='Shutdown the computer.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='restart',          isasync=True, paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='startup',                 paramTypes=[ ],       help='Start LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
