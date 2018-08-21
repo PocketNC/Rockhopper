@@ -984,6 +984,20 @@ class CommandItem( object ):
 
         return reply
 
+    def toggle_v1_v2revP(self):
+      global BOARD_REVISION
+      try:
+        if BOARD_REVISION == "v1revH":
+          print "Clearing version file"
+          boardRevision.clearVersionFile()
+        else:
+          print "Writing version file"
+          boardRevision.writeVersionFile("v1revH")
+        return self.restart_linuxcnc_and_rockhopper()
+      except e:
+        print e
+        return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
     def set_version(self, version):
         global POCKETNC_DIRECTORY
 
@@ -1290,6 +1304,8 @@ class CommandItem( object ):
                     reply = self.check_for_updates(passed_command_dict)
                 elif (self.name == 'set_version'):
                     reply = self.set_version( passed_command_dict.get('version', passed_command_dict['0']).strip() )
+                elif (self.name == 'toggle_v1_v2revP'):
+                    reply = self.toggle_v1_v2revP()
                 elif (self.name == 'add_user'):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
                 else:
@@ -1358,6 +1374,7 @@ CommandItem( name='set_compensation',      paramTypes=[ {'pname':'data', 'ptype'
 
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
