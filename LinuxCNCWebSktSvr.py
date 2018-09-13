@@ -23,6 +23,7 @@ import sys
 import os
 import gc
 import linuxcnc
+import datetime
 import math
 import tornado.ioloop
 import tornado.web
@@ -56,7 +57,7 @@ from random import random
 from time import strftime
 from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
-from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data
+from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 
 # modified from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
 def toIntOrString(text):
@@ -571,6 +572,49 @@ class StatusItem( object ):
         global userdict
         return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":userdict.keys() }
 
+    def get_system_status( self ):
+        code = LinuxCNCServerCommand.REPLY_COMMAND_OK
+        ret = { "data": {} }
+
+        try:
+            df_data = subprocess.check_output(['df']).split()
+            rootfsIndex = df_data.index("rootfs")
+            (total,used,available) = [ int(x) for x in df_data[rootfsIndex+1:rootfsIndex+4] ]
+
+            logs_used = int(subprocess.check_output(['sudo', 'du', '-k', '-d', '0', '/var/log']).split()[0])
+
+            ini_data = read_ini_data(INI_FILENAME)
+            ncfiles_path = get_parameter(ini_data, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
+
+            ncfiles_used = int(subprocess.check_output(['du', '-k', '-d', '0', ncfiles_path]).split()[0])
+
+            ret["data"] = {
+                "disk": {
+                    "total": total,
+                    "other": total-available-logs_used-ncfiles_used,
+                    "available": available,
+                    "logs": logs_used,
+                    "ncfiles": ncfiles_used
+                },
+                "addresses": [],
+# Format date/time so that javascript can parse it simply with new Date(string) while
+# and get the correct date and time regardless of time zone. The browser can then show
+# the local time zone.
+                "date": str(datetime.datetime.utcnow().strftime("%a %b %d %H:%M:%S UTC %Y"))
+            }
+
+            for ifaceName in interfaces():
+                ret["data"]["addresses"] += [ i['addr'] for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}]) if i['addr'] not in ['127.0.0.1'] ]
+        except Exception as e:
+            code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+            ret["data"] = e.message
+
+        ret["code"] = code
+
+        return ret
+
+      
+      
     def get_calibration_data( self ):
         ret = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":"" }
         try:
@@ -657,6 +701,8 @@ class StatusItem( object ):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
                     ret = self.get_calibration_data()
+                elif (self.name == 'system_status'):
+                    ret = self.get_system_status()
                 elif (self.name == 'config'):
                     ret = StatusItem.get_ini_data()
                 elif (self.name == 'config_item'):
@@ -799,6 +845,7 @@ StatusItem( name='config_item',              coreLinuxCNCVariable=False, watchab
 StatusItem( name='halfile',                  coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Contents of a hal file.  Pass in filename=??? to specify the hal file name', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='halgraph',                 coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"' ).register_in_dict( StatusItems )
 StatusItem( name='calibration_data',         coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Filename of the calibration.zip file generated from the current machine specific calibration data.' ).register_in_dict( StatusItems )
+StatusItem( name='system_status',            coreLinuxCNCVariable=False, watchable=False, valtype='dict',  help='System status information, such as IP addresses, disk usage, etc.' ).register_in_dict( StatusItems )
 StatusItem( name='ini_file_name',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='INI file to use for next LinuxCNC start.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='client_config',            coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Client Configuration.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='users',                    coreLinuxCNCVariable=False, watchable=True,  valtype='string',  help='Web server user list.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
@@ -1007,6 +1054,34 @@ class CommandItem( object ):
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'refresh_ui' }
+
+    def set_date(self, dateString):
+        try:
+          subprocess.call(['sudo', 'date', '-s', dateString])
+        except Exception as e:
+           return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'set_date' }
+
+    def clear_logs(self, commandDict):
+        try:
+           subprocess.call(['sudo', 'find', '/var/log', '-name', '*.*.gz', '-exec', 'rm', '{}', ';'], cwd=POCKETNC_DIRECTORY)
+           subprocess.call(['sudo', 'find', '/var/log', '-type', 'f', '-exec', 'truncate', '-s', '0', '{}', ';'], cwd=POCKETNC_DIRECTORY)
+        except:
+           return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_logs' }
+
+    def clear_ncfiles(self, commandDict):
+        try:
+            ini_data = read_ini_data(INI_FILENAME)
+            ncfiles_path = get_parameter(ini_data, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
+
+            subprocess.call(['find', ncfiles_path, '-type', 'f', '-exec', 'rm', '{}', ';'], cwd=POCKETNC_DIRECTORY)
+        except:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_ncfiles' }
 
     def check_for_updates(self, commandDict):
         global POCKETNC_DIRECTORY
@@ -1302,6 +1377,12 @@ class CommandItem( object ):
                     reply = self.put_compensation(passed_command_dict)
                 elif (self.name == 'check_for_updates'):
                     reply = self.check_for_updates(passed_command_dict)
+                elif (self.name == 'clear_logs'):
+                    reply = self.clear_logs(passed_command_dict)
+                elif (self.name == 'set_date'):
+                    reply = self.set_date(passed_command_dict['0'])
+                elif (self.name == 'clear_ncfiles'):
+                    reply = self.clear_ncfiles(passed_command_dict)
                 elif (self.name == 'set_version'):
                     reply = self.set_version( passed_command_dict.get('version', passed_command_dict['0']).strip() )
                 elif (self.name == 'toggle_v1_v2revP'):
@@ -1372,6 +1453,10 @@ CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear 
 CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_compensation',      paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],     help='Save a and b axis compensation tables', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
+CommandItem( name='set_date', isasync=False, paramTypes=[], help='Set the system time', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
+CommandItem( name='clear_logs', isasync=False, paramTypes=[], help='Truncate log files found in /var/log to 0 bytes.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='clear_ncfiles', isasync=False, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )

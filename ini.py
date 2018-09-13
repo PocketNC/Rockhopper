@@ -209,6 +209,44 @@ def read_ini_data(ini_file, only_section=None, only_name=None):
                         idv = idv + 1
     return INIFileData
 
+def get_parameter(data, section, name):
+  for param in data["parameters"]:
+    if param["values"]["section"] == section and param["values"]["name"] == name:
+      return param
+
+def set_parameter(data, section, name, value):
+  param_set = False
+  maxId = 0
+  for param in data["parameters"]:
+    maxId = max(maxId, param["id"])
+    if param["values"]["section"] == section and param["values"]["name"] == name:
+      param["values"]["value"] = str(value)
+      param_set = True
+
+  if not param_set:
+    if section not in data["sections"]:
+      help = ''
+      comment = ''
+      if section in ConfigHelp:
+        help = ConfigHelp[section]['']
+      data["sections"][section] = { 'comment': comment, 'help': help }
+
+    help = ''
+    default = ''
+    if name in ConfigHelp[section]:
+      help = ConfigHelp[section][name]["help"]
+      default = ConfigHelp[section][name]["default"]
+    data["parameters"].append({
+      'id': maxId+1,
+      'values': {
+        'comment': '',
+        'default': default,
+        'help': help,
+        'name': name,
+        'section': section,
+        'value': str(value)
+      }
+    })
 
 def ini_differences(defaults, save):
     diff = {
@@ -220,10 +258,13 @@ def ini_differences(defaults, save):
         name = param['values']['name']
         value = param['values']['value']
 
+        found_match = False
         for default_param in defaults['parameters']:
-            if name == default_param['values']['name'] and section == default_param['values']['section'] and value != default_param['values']['value']:
-                diff['parameters'].append(param)
+            if name == default_param['values']['name'] and section == default_param['values']['section'] and value == default_param['values']['value']:
+                found_match = True
 
+        if not found_match:
+            diff['parameters'].append(param)
     for param in diff['parameters']:
         diff['sections'][param['values']['section']] = save['sections'][param['values']['section']]
 
