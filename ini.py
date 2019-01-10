@@ -270,6 +270,28 @@ def ini_differences(defaults, save):
 
     return diff
 
+def append_ini_data(defaults, extras):
+  alldata = deepcopy(defaults)
+  maxId = 0
+  for default_param in defaults['parameters']:
+    if maxId < default_param['id']:
+      maxId = default_param['id']
+
+  for param in extras['parameters']:
+    section = param['values']['section']
+    name = param['values']['name']
+    value = param['values']['value']
+
+    print "Adding [%s](%s) as %s" % (section, name, value)
+    maxId += 1
+    if section not in alldata['sections']:
+        alldata['sections'][section] = extras['sections'][section]
+    alldata['parameters'].append({
+        'id': maxId,
+        'values': { 'comment': param['values']['comment'], 'default': param['values']['default'], 'help': param['values']['help'], 'name': name, 'section': section, 'value': value }
+    })
+  return alldata
+
 def merge_ini_data(defaults, overlay):
     merged = deepcopy(defaults)
 
