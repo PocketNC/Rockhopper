@@ -717,6 +717,8 @@ class StatusItem( object ):
                     ret = self.get_users()
                 elif (self.name == 'board_revision'):
                     ret['data'] = BOARD_REVISION
+                elif (self.name == 'dogtag'):
+                    ret['data'] = subprocess.check_output(['cat', '/etc/dogtag']).strip()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
             else:
@@ -782,6 +784,7 @@ StatusItem( name='file_content',             coreLinuxCNCVariable=False, watchab
 StatusItem( name='versions',                 requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string[]' , help='available PocketNC versions (list of tags available in git repository)').register_in_dict( StatusItems )
 StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='current PocketNC version (current tag in git repository)' ).register_in_dict( StatusItems )
 StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
+StatusItem( name='dogtag',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='dogtag' ).register_in_dict( StatusItems )
 StatusItem( name='flood',                    watchable=True, valtype='int' ,    help='flood enabled' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_index',                watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_offset',               watchable=True, valtype='float[]', help='offset of the currently active coordinate system, a pose' ).register_in_dict( StatusItems )
