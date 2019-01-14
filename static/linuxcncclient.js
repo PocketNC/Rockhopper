@@ -1043,6 +1043,9 @@ function addCompensationLine(parent, afterNode, angle, forward, reverse) {
   removeButton.innerHTML = "x";
   removeButton.addEventListener("click", function(e) {
       parent.removeChild(e.target.parentElement);
+      if(parent.children.length === 0){
+          addCompensationLine(parent, e.target.parentElement, "", "", "");
+      }
   });
 
   div.appendChild(removeButton);
