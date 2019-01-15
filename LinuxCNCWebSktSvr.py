@@ -1214,7 +1214,7 @@ class CommandItem( object ):
             data = '\n'.join(lines)
 
             try:
-                fo = open( os.path.join( path, f ), 'w' )
+                fo = open( os.path.join( path, f ), 'a' )
                 fo.write(data)
             except:
                 reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
