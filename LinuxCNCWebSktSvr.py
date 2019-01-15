@@ -1190,8 +1190,8 @@ class CommandItem( object ):
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply         
-    
-    
+            
+
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
 
