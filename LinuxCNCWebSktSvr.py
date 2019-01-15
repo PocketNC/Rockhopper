@@ -1190,8 +1190,8 @@ class CommandItem( object ):
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply         
-            
-
+    
+    
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
 
@@ -1204,6 +1204,15 @@ class CommandItem( object ):
 
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
             
+            #remove any python embedded in comments
+            lines = data.split('\n')
+            for idx, line in enumerate(lines):
+                commentIdx = line.find(';py')
+                if commentIdx != -1:
+                    lines[idx] = line[:commentIdx]
+                
+            data = '\n'.join(lines)
+
             try:
                 fo = open( os.path.join( path, f ), 'w' )
                 fo.write(data)
