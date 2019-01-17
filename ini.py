@@ -233,7 +233,7 @@ def set_parameter(data, section, name, value):
 
     help = ''
     default = ''
-    if name in ConfigHelp[section]:
+    if section in ConfigHelp and name in ConfigHelp[section]:
       help = ConfigHelp[section][name]["help"]
       default = ConfigHelp[section][name]["default"]
     data["parameters"].append({
