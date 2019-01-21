@@ -1190,7 +1190,25 @@ class CommandItem( object ):
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply         
-            
+           
+
+    def clean_gcode( self, data ):
+        lines = data.split('\n')
+        for lineIdx, line in enumerate(lines):
+            commentIdx = line.find('(py,')
+            while commentIdx != -1:
+                print commentIdx
+                closeIdx = line.find(')', commentIdx)
+                closeIdx = closeIdx if ( closeIdx != -1 ) else ( len(line) - 1 )
+                line = line[:commentIdx] + line[closeIdx + 1:]
+                lines[lineIdx] = line
+                commentIdx = line.find('(py,')
+            commentIdx = line.find(';py,')
+            if commentIdx != -1:
+                lines[lineIdx] = line[:commentIdx]
+        
+        return '\n'.join(lines)
+
 
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
@@ -1204,17 +1222,9 @@ class CommandItem( object ):
 
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
             
-            #remove any python embedded in comments
-            lines = data.split('\n')
-            for idx, line in enumerate(lines):
-                commentIdx = line.find(';py')
-                if commentIdx != -1:
-                    lines[idx] = line[:commentIdx]
-                
-            data = '\n'.join(lines)
-
             try:
                 fo = open( os.path.join( path, f ), 'w' )
+                data = self.clean_gcode(data);
                 fo.write(data)
             except:
                 reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
