@@ -400,6 +400,20 @@ class StatusItem( object ):
             f.close()
         return ret
 
+    def read_gcode_chunk( self, filename, start, size):
+        try:
+            f = open(filename, 'r')
+            f.seek(idx)
+            ret = f.read(10000)
+        except ex:
+            print ex
+            ret = ""
+        finally:
+            f.close()
+        return ret
+
+       
+
     @staticmethod
     def get_ini_data_item(section, item_name):
         try:
@@ -691,6 +705,9 @@ class StatusItem( object ):
                     ret['data'] = INI_FILENAME
                 elif (self.name == 'file_content'):
                     ret['data'] = self.read_gcode_file(linuxcnc_status_poller.linuxcnc_status.file)
+                elif (self.name == 'file_chunk'):
+                    idx = self.id.split("_")
+                    ret['data'] = self.read_gcode_chunk(linuxcnc_status_poller.linuxcnc_status.file, int(idx[0]), int(idx[1]))
                 elif (self.name == 'versions'):
                     ret = self.get_versions()
                 elif (self.name == 'current_version'):
@@ -779,6 +796,7 @@ StatusItem( name='feed_override_enabled',    watchable=True, valtype='int' ,    
 StatusItem( name='feedrate',                 watchable=True, valtype='float' ,  help='current feedrate' ).register_in_dict( StatusItems )
 StatusItem( name='file',                     watchable=True, valtype='string' , help='currently executing gcode file' ).register_in_dict( StatusItems )
 StatusItem( name='file_content',             coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='currently executing gcode file contents' ).register_in_dict( StatusItems )
+StatusItem( name='file_chunk',               coreLinuxCNCVariable=False, watchable=False,valtype='string', help='chunk of currently executing gcode file contents' ).register_in_dict( StatusItems)
 StatusItem( name='versions',                 requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string[]' , help='available PocketNC versions (list of tags available in git repository)').register_in_dict( StatusItems )
 StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='current PocketNC version (current tag in git repository)' ).register_in_dict( StatusItems )
 StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
@@ -1190,7 +1208,25 @@ class CommandItem( object ):
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply         
-            
+
+
+    def clean_gcode( self, data ):
+        lines = data.split('\n')
+        for lineIdx, line in enumerate(lines):
+            commentIdx = line.find('(py,')
+            while commentIdx != -1:
+                print commentIdx
+                closeIdx = line.find(')', commentIdx)
+                closeIdx = closeIdx if ( closeIdx != -1 ) else ( len(line) - 1 )
+                line = line[:commentIdx] + line[closeIdx + 1:]
+                lines[lineIdx] = line
+                commentIdx = line.find('(py,')
+            commentIdx = line.find(';py,')
+            if commentIdx != -1:
+                lines[lineIdx] = line[:commentIdx]
+        
+        return '\n'.join(lines)
+
 
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
@@ -1204,18 +1240,10 @@ class CommandItem( object ):
 
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
             
-            #remove any python embedded in comments
-            lines = data.split('\n')
-            for idx, line in enumerate(lines):
-                commentIdx = line.find(';py')
-                if commentIdx != -1:
-                    lines[idx] = line[:commentIdx]
-                
-            data = '\n'.join(lines)
-
             try:
                 fo = open( os.path.join( path, f ), 'w' )
-                fo.write(data)
+                data = self.clean_gcode(data);
+                fo.write(data.encode('utf8'))
             except:
                 reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             finally:
@@ -1230,24 +1258,6 @@ class CommandItem( object ):
         except Exception as ex:
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-   
-
-    def strip_python_comments( self, data ):
-        lines = data.split('\n')
-        for lineIdx, line in enumerate(lines):
-            commentIdx = line.find('(py,')
-            while commentIdx != -1:
-                closeIdx = line.find(')', commentIdx)
-                closeIdx = closeIdx if ( closeIdx != -1 ) else ( len(line) - 1 )
-                line = line[:commentIdx] + line[closeIdx + 1:]
-                lines[lineIdx] = line
-                commentIdx = line.find('(py,')
-            commentIdx = line.find(';py,')
-            if commentIdx != -1:
-                lines[lineIdx] = line[:commentIdx]
-        
-        return '\n'.join(lines)
- 
 
 
     #start: T for initial chunk of file
@@ -1262,27 +1272,35 @@ class CommandItem( object ):
             [h,f] = os.path.split( filename )
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
             
-            #if an existing file with same name, we will ask for overwrite permission, and write to tmp until finish
-            if(os.path.isfile( os.path.join( path, f ) ) ):
-                path = tempfile.gettempdir() 
-                if( start and not ovw):
-                    try:
-                        os.remove(os.path.join(path,f))
-                    except OSError:
-                        pass
+            if( start ):
+                if ( ( not ovw ) and ( os.path.isfile( os.path.join( path, f ) ) ) ):
                     reply['data'] = 'occupied'
                     return reply
-            
-            data = self.strip_python_comments( data )
+                else:
+                    try:
+                        shutil.rmtree( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
+                        os.mkdir( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
+                    except:
+                        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+                        reply['data'] = 'Exception deleting or creating /tmp/ncfiles directory'
+                        return reply
+
+            tmp = os.path.join( tempfile.gettempdir(), 'ncfiles' )
             
             try:
-                fo = open( os.path.join( path, f ), 'a' )
-                fo.write(data)
-                if( end and ovw):
-                    tmppath = path
-                    path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
-                    os.remove(os.path.join(path,f));
-                    os.rename(os.path.join( tmppath, f ), os.path.join( path, f))
+                fo = open( os.path.join( tmp, f ), 'a' )
+                data = self.clean_gcode( data )
+                fo.write(data.encode('utf8'))
+                if( end ):
+                    if( ovw ):
+                        try:
+                            os.remove(os.path.join(path,f))
+                        except OSError:
+                            pass
+                    try:
+                        os.rename(os.path.join( tmp, f ), os.path.join( path, f))
+                    except:
+                        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
             except:
                 reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
@@ -1292,7 +1310,7 @@ class CommandItem( object ):
                 except:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             if( end and (reply['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK)):
-                    linuxcnc_command.program_open( os.path.join( path, f ) ) 
+                linuxcnc_command.program_open( os.path.join( path, f ) ) 
          
         except Exception as ex:
             print ex
@@ -1300,19 +1318,19 @@ class CommandItem( object ):
         return reply         
    
 
-    def get_chunk_gcode_file( self, filename, start=0, size=0):
+    def get_chunk_gcode_file( self, idx, linuxcnc_status_poller ):
+        reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
-            path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
-            path = os.path.join( path, filename )
-            f = open( path, 'r' )
-            f.seek(start)
-            ret = [f.read(size), os.path.getsize(path)] 
+            f = open(linuxcnc_status_poller.linuxcnc_status.file, 'r')
+            f.seek(idx)
+            data = f.read(10000)
+            reply['data'] = data
         except ex:
             print ex
-            ret = ""
+            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         finally:
             f.close()
-        return ret
+        return reply
 
 
     # writes the specified HAL file to disk
@@ -1464,8 +1482,8 @@ class CommandItem( object ):
                 elif (self.name == 'program_upload_chunk'):
                     reply = self.put_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']), start=passed_command_dict.get('start', passed_command_dict['2']), end=passed_command_dict.get('end', passed_command_dict['3']), ovw=passed_command_dict.get('ovw', passed_command_dict['4']) )
                 elif (self.name == 'program_download_chunk'):
-                    reply = self.get_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), start=passed_command_dict.get('start', passed_command_dict['1']), size=passed_command_dict.get('size', passed_command_dict['2']) )
-                elif (self.name == 'program_delete'):
+                    reply = self.get_chunk_gcode_file(idx=passed_command_dict.get('idx', passed_command_dict['0']), linuxcnc_status_poller=linuxcnc_status_poller) 
+                elif (self.name == 'program_delete'):   
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) )
@@ -1521,7 +1539,7 @@ CommandItem( name='override_limits',         paramTypes=[],      help='set the o
 CommandItem( name='program_open',            paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}],      help='Open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload_chunk',    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
-CommandItem( name='program_upload_finish',   paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Finish uploading an NGC file.' ).register_in_dict( CommandItems )
+CommandItem( name='program_download_chunk',  paramTypes=[ {'pname':'idx', 'ptype':'int', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Send a chunk of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
 CommandItem( name='program_delete',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Delete a file from the programs directory.' ).register_in_dict( CommandItems )
 CommandItem( name='reset_interpreter',       paramTypes=[],      help='reset the RS274NGC interpreter' ).register_in_dict( CommandItems )
 CommandItem( name='set_adaptive_feed',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='set adaptive feed flag ' ).register_in_dict( CommandItems )
