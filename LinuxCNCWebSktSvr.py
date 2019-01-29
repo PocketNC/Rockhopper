@@ -112,6 +112,7 @@ lastBackplotFilename = ""
 lastBackplotData = ""
 BackplotLock = threading.Lock() 
 
+uploadingFile = None
 
 # *****************************************************
 # Class to poll linuxcnc for status.  Other classes can request to be notified
@@ -399,20 +400,6 @@ class StatusItem( object ):
         finally:
             f.close()
         return ret
-
-    def read_gcode_chunk( self, filename, start, size):
-        try:
-            f = open(filename, 'r')
-            f.seek(idx)
-            ret = f.read(10000)
-        except ex:
-            print ex
-            ret = ""
-        finally:
-            f.close()
-        return ret
-
-       
 
     @staticmethod
     def get_ini_data_item(section, item_name):
@@ -705,9 +692,6 @@ class StatusItem( object ):
                     ret['data'] = INI_FILENAME
                 elif (self.name == 'file_content'):
                     ret['data'] = self.read_gcode_file(linuxcnc_status_poller.linuxcnc_status.file)
-                elif (self.name == 'file_chunk'):
-                    idx = self.id.split("_")
-                    ret['data'] = self.read_gcode_chunk(linuxcnc_status_poller.linuxcnc_status.file, int(idx[0]), int(idx[1]))
                 elif (self.name == 'versions'):
                     ret = self.get_versions()
                 elif (self.name == 'current_version'):
@@ -796,7 +780,6 @@ StatusItem( name='feed_override_enabled',    watchable=True, valtype='int' ,    
 StatusItem( name='feedrate',                 watchable=True, valtype='float' ,  help='current feedrate' ).register_in_dict( StatusItems )
 StatusItem( name='file',                     watchable=True, valtype='string' , help='currently executing gcode file' ).register_in_dict( StatusItems )
 StatusItem( name='file_content',             coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='currently executing gcode file contents' ).register_in_dict( StatusItems )
-StatusItem( name='file_chunk',               coreLinuxCNCVariable=False, watchable=False,valtype='string', help='chunk of currently executing gcode file contents' ).register_in_dict( StatusItems)
 StatusItem( name='versions',                 requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string[]' , help='available PocketNC versions (list of tags available in git repository)').register_in_dict( StatusItems )
 StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=False,valtype='string' , help='current PocketNC version (current tag in git repository)' ).register_in_dict( StatusItems )
 StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
@@ -1230,7 +1213,7 @@ class CommandItem( object ):
 
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
-        
+ 
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
             
@@ -1265,51 +1248,35 @@ class CommandItem( object ):
     #ovw: T if overwrite permission given by user
     def put_chunk_gcode_file( self, filename, data, start, end, ovw ):
         global linuxcnc_command
+        global uploadingFile
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
             # strip off just the filename, if a path was given
             # we will only look in the config directory, so we ignore path
             [h,f] = os.path.split( filename )
             path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
-            
             if( start ):
                 if ( ( not ovw ) and ( os.path.isfile( os.path.join( path, f ) ) ) ):
                     reply['data'] = 'occupied'
                     return reply
-                else:
-                    try:
-                        shutil.rmtree( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
-                        os.mkdir( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
-                    except:
-                        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-                        reply['data'] = 'Exception deleting or creating /tmp/ncfiles directory'
-                        return reply
-
-            tmp = os.path.join( tempfile.gettempdir(), 'ncfiles' )
-            
-            try:
-                fo = open( os.path.join( tmp, f ), 'a' )
-                data = self.clean_gcode( data )
-                fo.write(data.encode('utf8'))
-                if( end ):
-                    if( ovw ):
-                        try:
-                            os.remove(os.path.join(path,f))
-                        except OSError:
-                            pass
-                    try:
-                        os.rename(os.path.join( tmp, f ), os.path.join( path, f))
-                    except:
-                        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-
-            except:
-                reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-            finally:
+                
                 try:
-                    fo.close()
-                except:
-                    reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-            if( end and (reply['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK)):
+                    shutil.rmtree( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
+                except OSError:
+                    pass
+                os.mkdir( os.path.join( tempfile.gettempdir(), 'ncfiles' ) )
+                uploadingFile = open( os.path.join( tempfile.gettempdir(), 'ncfiles', f ), 'a' )
+
+            data = self.clean_gcode( data )
+            uploadingFile.write( data.encode('utf8') ) 
+            if( end ):
+                if( ovw ):
+                    try:
+                        os.remove(os.path.join(path,f))
+                    except OSError:
+                        pass
+                os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), os.path.join( path, f))
+                uploadingFile.close()
                 linuxcnc_command.program_open( os.path.join( path, f ) ) 
          
         except Exception as ex:
@@ -1483,7 +1450,7 @@ class CommandItem( object ):
                     reply = self.put_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']), start=passed_command_dict.get('start', passed_command_dict['2']), end=passed_command_dict.get('end', passed_command_dict['3']), ovw=passed_command_dict.get('ovw', passed_command_dict['4']) )
                 elif (self.name == 'program_download_chunk'):
                     reply = self.get_chunk_gcode_file(idx=passed_command_dict.get('idx', passed_command_dict['0']), linuxcnc_status_poller=linuxcnc_status_poller) 
-                elif (self.name == 'program_delete'):   
+                elif (self.name == 'program_delete'):
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
                     reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) )
