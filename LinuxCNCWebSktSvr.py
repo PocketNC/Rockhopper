@@ -1208,7 +1208,7 @@ class CommandItem( object ):
             
             try:
                 fo = open( os.path.join( path, f ), 'w' )
-                fo.write(data)
+                fo.write(data.encode('utf8'))
             except:
                 reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             finally:
