@@ -1298,6 +1298,16 @@ class CommandItem( object ):
         finally:
             f.close()
         return reply
+    
+
+    def get_gcode_file_size( self, linuxcnc_status_poller ):
+        reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+        try:
+            reply['data'] = os.path.getsize(linuxcnc_status_poller.linuxcnc_status.file)
+        except ex:
+            print ex
+            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        return reply
 
 
     # writes the specified HAL file to disk
@@ -1450,6 +1460,8 @@ class CommandItem( object ):
                     reply = self.put_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']), start=passed_command_dict.get('start', passed_command_dict['2']), end=passed_command_dict.get('end', passed_command_dict['3']), ovw=passed_command_dict.get('ovw', passed_command_dict['4']) )
                 elif (self.name == 'program_download_chunk'):
                     reply = self.get_chunk_gcode_file(idx=passed_command_dict.get('idx', passed_command_dict['0']), linuxcnc_status_poller=linuxcnc_status_poller) 
+                elif (self.name == 'program_get_size'):
+                    reply = self.get_gcode_file_size(linuxcnc_status_poller=linuxcnc_status_poller) 
                 elif (self.name == 'program_delete'):
                     reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
                 elif (self.name == 'save_client_config'):
@@ -1507,6 +1519,7 @@ CommandItem( name='program_open',            paramTypes=[ {'pname':'filename', '
 CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload_chunk',    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_download_chunk',  paramTypes=[ {'pname':'idx', 'ptype':'int', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Send a chunk of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
+CommandItem( name='program_get_size',        paramTypes=[], command_type=CommandItem.SYSTEM, help='Send the size of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
 CommandItem( name='program_delete',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Delete a file from the programs directory.' ).register_in_dict( CommandItems )
 CommandItem( name='reset_interpreter',       paramTypes=[],      help='reset the RS274NGC interpreter' ).register_in_dict( CommandItems )
 CommandItem( name='set_adaptive_feed',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='set adaptive feed flag ' ).register_in_dict( CommandItems )
