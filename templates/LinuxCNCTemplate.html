@@ -20,7 +20,8 @@
             <div id="section_tabs">
                 <ul>
                     <!-- CSS Tabs -->
-                    <li {% if name=='config' %}id="current"{% end %} ><a href="LinuxCNCConfig.html"><span>Configure</span></a></li>
+                    <li {% if name=='config_overlay' %}id="current"{% end %} ><a href="LinuxCNCConfigOverlay.html"><span>Configure</span></a></li>
+                    <li {% if name=='config' %}id="current"{% end %} ><a href="LinuxCNCConfig.html"><span>INI Setup</span></a></li>
                     <li {% if name=='halsetup' %}id="current"{% end %}><a href="LinuxCNCHALSetup.html"><span>HAL Setup</span></a></li>                
                     <li {% if name=='halgraph' %}id="current"{% end %}><a href="LinuxCNCHALGraph.html"><span>HAL Graph</span></a></li>
                     <li {% if name=='system' %}id="current"{% end %}><a href="LinuxCNCSystem.html"><span>System</span></a></li>

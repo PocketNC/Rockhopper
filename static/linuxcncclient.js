@@ -425,6 +425,24 @@ var gEditableGrid;
 function ConfigSocketOpen()
 {
     gEditableGrid = new EditableGrid("LinuxCNC Configuration File", {enableSort: true, editmode:"absolute" } );
+    gEditableGrid.readonly = true;
+    
+    Metadata = new Array(  
+        {"name":"name","label":"NAME","datatype":"string","editable":false}, 
+        {"name":"value","label":"VALUE","datatype":"string","editable":false}, 
+        {"name":"comment","label":"COMMENT","datatype":"string","editable":false}, 
+        {"name":"help","label":"HELP","datatype":"string","editable":false}
+     ); 
+
+    
+    ws.onmessage = ConfigSocketMessageHandler;
+    document.getElementById("Command_Reply").innerHTML = "Ready to load configuration."
+    ws.send( JSON.stringify({ "id":"CONFIG", "command":"get", "name":"config" }) ) ;
+}
+
+function ConfigOverlaySocketOpen()
+{
+    gEditableGrid = new EditableGrid("LinuxCNC Configuration File", {enableSort: true, editmode:"absolute" } );
     
     Metadata = new Array(  
         {"name":"name","label":"NAME","datatype":"string","editable":true}, 
@@ -437,9 +455,8 @@ function ConfigSocketOpen()
     
     ws.onmessage = ConfigSocketMessageHandler;
     document.getElementById("Command_Reply").innerHTML = "Ready to load configuration."
-    ws.send( JSON.stringify({ "id":"CONFIG", "command":"get", "name":"config" }) ) ;
+    ws.send( JSON.stringify({ "id":"CONFIG", "command":"get", "name":"config_overlay" }) ) ;
 }
-
 // helper function to get path of a demo image
 function image(relativePath) {
     return "/static/editablegrid-2.0.1/images/" + relativePath;
@@ -468,16 +485,18 @@ EditableGrid.prototype.initializeGrid = function(  )
         };         
 
         // render for the action column
-        setCellRenderer("action", new CellRenderer({
-            render: function(cell, value) {
-                // this action will remove the row, so first find the ID of the row containing this cell
-                var rowId = editableGrid.getRowId(cell.rowIndex);
-                cell.innerHTML = "<a onclick=\"if (confirm('Are you sure you want to delete this row? ')) { " + grid_str + ".remove(" + cell.rowIndex + ");  } \" style=\"cursor:pointer\">" +
-                "<img src=\"" + image("delete.png") + "\" border=\"0\" alt=\"delete\" title=\"Delete row\"/></a>";
-                cell.innerHTML+= "&nbsp;<a onclick=\"" + grid_str + ".duplicate(" + cell.rowIndex + ");\" style=\"cursor:pointer\">" +
-                "<img src=\"" + image("duplicate.png") + "\" border=\"0\" alt=\"duplicate\" title=\"Duplicate row\"/></a>";
-            }
-        }));         
+        if(!this.readonly) {
+            setCellRenderer("action", new CellRenderer({
+                render: function(cell, value) {
+                    // this action will remove the row, so first find the ID of the row containing this cell
+                    var rowId = editableGrid.getRowId(cell.rowIndex);
+                    cell.innerHTML = "<a onclick=\"if (confirm('Are you sure you want to delete this row? ')) { " + grid_str + ".remove(" + cell.rowIndex + ");  } \" style=\"cursor:pointer\">" +
+                    "<img src=\"" + image("delete.png") + "\" border=\"0\" alt=\"delete\" title=\"Delete row\"/></a>";
+                    cell.innerHTML+= "&nbsp;<a onclick=\"" + grid_str + ".duplicate(" + cell.rowIndex + ");\" style=\"cursor:pointer\">" +
+                    "<img src=\"" + image("duplicate.png") + "\" border=\"0\" alt=\"duplicate\" title=\"Duplicate row\"/></a>";
+                }
+            }));         
+        }
         
     }
 }
@@ -722,6 +741,12 @@ function ConfigSocketMessageHandler(evt)
         a.download = "calibration" + document.getElementById("calibrationSerialNumber").value + "_" + now.getFullYear() + "-" + ("" + (now.getMonth()+1)).padStart(2, "0") + "-" + ("" + now.getDate()).padStart(2, "0") + ".zip";
         a.href = result["data"];
         a.click();
+    } else if(result["id"] === "TempSetINIData") {
+        if(result["code"] === "?OK") {
+          alert("Configuration change has temporarily taken effect. Press the Save Configuration button to store permanently.")
+        } else {
+          alert("Configuration change has NOT taken effect. Press the Save Configuration button then Restart LinuxCNC and Rockhopper in the System tab for the change to take effect. ")
+        }
     } else {
         alert("Last command reply: " + result["code"].substring(1));
     }
@@ -1314,6 +1339,8 @@ function PollLinuxCNC( type )
         ws.custom_onopen = HALGraphSocketOpen;
     else if (type == 'config')
         ws.custom_onopen = ConfigSocketOpen;
+    else if (type == 'config_overlay')
+        ws.custom_onopen = ConfigOverlaySocketOpen;
     else if (type == 'halsetup')
         ws.custom_onopen = HALSetupSocketOpen;
     else if (type == 'sandbox')

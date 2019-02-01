@@ -408,6 +408,17 @@ class StatusItem( object ):
             reply = {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND,'data':''}
         return reply        
 
+    @staticmethod
+    def get_overlay_data():
+      try:
+        ini_data = read_ini_data(CALIBRATION_OVERLAY_FILE)
+        reply = {'data': ini_data, 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+      except Exception as ex:
+        reply = {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND,'data':''}
+
+      return reply
+
+
     # called in a "get_config" command to read the config file and output it's values
     @staticmethod
     def get_ini_data( only_section=None, only_name=None ):
@@ -705,6 +716,8 @@ class StatusItem( object ):
                     ret = self.get_system_status()
                 elif (self.name == 'config'):
                     ret = StatusItem.get_ini_data()
+                elif (self.name == 'config_overlay'):
+                    ret = StatusItem.get_overlay_data()
                 elif (self.name == 'config_item'):
                     ret = StatusItem.get_ini_data_item(command_dict.get("section", ''),command_dict.get("parameter", ''))
                 elif (self.name == 'halfile'):
@@ -844,6 +857,7 @@ StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchab
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
+StatusItem( name='config_overlay',           coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config Overlay (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
 StatusItem( name='config_item',              coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Specific section/name from the config file.  Pass in section=??? and name=???.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
 StatusItem( name='halfile',                  coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Contents of a hal file.  Pass in filename=??? to specify the hal file name', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='halgraph',                 coreLinuxCNCVariable=False, watchable=False, valtype='string',  help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"' ).register_in_dict( StatusItems )
@@ -1016,12 +1030,9 @@ class CommandItem( object ):
         global CALIBRATION_OVERLAY_FILE
         reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
         try:
-            save_data = commandDict['data']
-            default_data = read_ini_data(INI_DEFAULTS_FILE)
+            overlay = commandDict['data']
 
-            overlay = ini_differences(default_data, save_data)
             write_ini_data(overlay, CALIBRATION_OVERLAY_FILE)
-            write_ini_data(save_data, INI_FILENAME)
             reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
         except:
             print "Unexpected error:", sys.exc_info()[0]
@@ -1449,7 +1460,7 @@ CommandItem( name='traj_mode',               paramTypes=[ {'pname':'mode', 'ptyp
 CommandItem( name='unhome',                  paramTypes=[ {'pname':'axis', 'ptype':'int', 'optional':False} ],       help='unhome a given axis' ).register_in_dict( CommandItems )
 CommandItem( name='wait_complete',           paramTypes=[ {'pname':'timeout', 'ptype':'float', 'optional':True} ],       help='wait for completion of the last command sent. If timeout in seconds not specified, default is 1 second' ).register_in_dict( CommandItems )
 
-CommandItem( name='config',                  paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='config',                  paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config overlay file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Temporarily set a single INI config item so that the change takes effect in linuxcnc, but is not saved to the INI file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='halfile',                 paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ],       help='Overwrite the specified file.  Parameter is a filename, then a string containing the new hal file contents.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear the last error condition.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
