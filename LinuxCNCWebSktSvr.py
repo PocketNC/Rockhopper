@@ -854,6 +854,7 @@ StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
 StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
