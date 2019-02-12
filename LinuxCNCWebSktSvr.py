@@ -58,6 +58,10 @@ from time import strftime
 from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
 from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
+import machinekit.hal
+
+def set_date_string(dateString):
+  subprocess.call(['sudo', 'date', '-s', dateString])
 
 # modified from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
 def toIntOrString(text):
@@ -144,6 +148,11 @@ class LinuxCNCStatusPoller(object):
         # register listeners
         self.observers = []
         self.hal_observers = []
+
+        try:
+          self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
+        except:
+          self.hss_aborted_pin = None
         
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -252,22 +261,33 @@ class LinuxCNCStatusPoller(object):
         if (self.linuxcnc_is_alive is False):
             return
 
-        if ( (self.linuxcnc_errors is None) ):
-            self.linuxcnc_errors = linuxcnc.error_channel()
-        try:    
-            error = self.linuxcnc_errors.poll()
+        if self.hss_aborted_pin and self.hss_aborted_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_warmpup", 
+            "type":"error", 
+            "text": "You must run the spindle warm up sequence since it hasn't been turned on in over 3 days.", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_aborted_pin.set(0);
+        else:
+          if ( (self.linuxcnc_errors is None) ):
+              self.linuxcnc_errors = linuxcnc.error_channel()
+          try:    
+              error = self.linuxcnc_errors.poll()
 
-            if error:
-                kind, text = error
-                if kind in (linuxcnc.NML_ERROR, linuxcnc.OPERATOR_ERROR):
-                    typus = "error"
-                else:
-                    typus = "info"
-                lastLCNCerror = { "kind":kind, "type":typus, "text":text, "time":strftime("%Y-%m-%d %H:%M:%S"), "id":self.errorid }
+              if error:
+                  kind, text = error
+                  if kind in (linuxcnc.NML_ERROR, linuxcnc.OPERATOR_ERROR):
+                      typus = "error"
+                  else:
+                      typus = "info"
+                  lastLCNCerror = { "kind":kind, "type":typus, "text":text, "time":strftime("%Y-%m-%d %H:%M:%S"), "id":self.errorid }
 
-                self.errorid = self.errorid + 1 
-        except:
-            pass
+                  self.errorid = self.errorid + 1 
+          except:
+              pass
 
     def poll_update(self):
         global linuxcnc_command
@@ -1073,7 +1093,7 @@ class CommandItem( object ):
 
     def set_date(self, dateString):
         try:
-          subprocess.call(['sudo', 'date', '-s', dateString])
+          set_date_string(dateString)
         except Exception as e:
            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
 
@@ -1882,6 +1902,22 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
                 id = commandDict.get('id','Login').strip()
                 user = commandDict['user'].strip()
                 pw = hashlib.md5(commandDict['password'].strip()).hexdigest()
+                dateString = commandDict.get('date', None)
+                
+                # Beaglebone Black can't keep time, so it uses NTP to set the time.
+                # If there's no internet connection, or the NTP servers are down,
+                # the date will be wrong. The UI sends the connected computers
+                # current time on login, so we can use that to set a better-than-default
+                # time.
+
+                if dateString:
+                  uiDateTime = datetime.datetime.strptime(dateString, "%Y-%m-%dT%H:%M:%S.%fZ")
+                  serverDateTime = datetime.datetime.utcnow()
+
+                  if (uiDateTime-serverDateTime).days >= 1:
+                    print "UI time greater than a day ahead of server time. Setting server time to %s" % dateString
+                    set_date_string(dateString)
+
                 if ( ( user in userdict ) and ( userdict.get(user) == pw ) ):
                     self.user_validated = True
                     self.write_message(json.dumps( { 'id':id, 'code':'?OK', 'data':'?OK'}, cls=StatusItemEncoder ))
