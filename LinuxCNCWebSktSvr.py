@@ -265,7 +265,7 @@ class LinuxCNCStatusPoller(object):
           lastLCNCerror = { 
             "kind": "spindle_warmpup", 
             "type":"error", 
-            "text": "You must run the spindle warm up sequence since it hasn't been turned on in over 3 days.", 
+            "text": "You must run the spindle warm up sequence since it hasn't been turned on in over 12 hours.", 
             "time":strftime("%Y-%m-%d %H:%M:%S"), 
             "id":self.errorid 
           }
@@ -873,6 +873,7 @@ StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
+StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
