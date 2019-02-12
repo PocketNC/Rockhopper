@@ -203,7 +203,10 @@ def read_ini_data(ini_file, only_section=None, only_name=None):
                         except:
                             pass
 
-                        if (only_section is None or (only_section == section and only_name == mo.group(1) )):
+                        if (
+                            only_section is None or 
+                           (only_section == section and not only_name) or
+                           (only_section == section and only_name == mo.group(1) )):
                             INIFileData['parameters'].append( { 'id':idv, 'values':{ 'section':section, 'name':mo.group(1), 'value':mo.group(2), 'comment':comments, 'help':hlp, 'default':default } } )
                         comments = ''
                         idv = idv + 1
