@@ -610,8 +610,10 @@ class StatusItem( object ):
 
         try:
             df_data = subprocess.check_output(['df']).split()
-            rootfsIndex = df_data.index("rootfs")
-            (total,used,available) = [ int(x) for x in df_data[rootfsIndex+1:rootfsIndex+4] ]
+            #df gives 6 columns of data. The 6th column, Mounted on, provides a search term for the root directory ("/") which is consistent across tested versions of df
+            #The 3 desired disk space values are located 4, 3, and 2 positions behind the location of this search term
+            totalIndex = df_data.index("/") - 4
+            (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ]
 
             logs_used = int(subprocess.check_output(['sudo', 'du', '-k', '-d', '0', '/var/log']).split()[0])
 
