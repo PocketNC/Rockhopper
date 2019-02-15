@@ -897,6 +897,8 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 
+StatusItem( name='halpin_run_time_clock.seconds', coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
+
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
 StatusItem( name='axis',                     watchable=True, valtype='dict' ,   help='Axis Dictionary', isarray=True, arraylen=axis_length ).register_in_dict( StatusItems )
