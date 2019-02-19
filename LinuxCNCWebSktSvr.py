@@ -153,7 +153,12 @@ class LinuxCNCStatusPoller(object):
           self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
         except:
           self.hss_aborted_pin = None
-        
+ 
+        try:
+          self.rtc_seconds_pin = machinekit.hal.Pin("run_time_clock.seconds")
+        except:
+          self.rtc_seconds_pin = None
+               
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
         self.sig_dict = {}
@@ -757,6 +762,8 @@ class StatusItem( object ):
                     ret['data'] = subprocess.check_output(['cat', '/etc/dogtag']).strip()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
+                elif (self.name == 'rtc_seconds'):
+                    ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -897,7 +904,7 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 
-StatusItem( name='halpin_run_time_clock.seconds', coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
+StatusItem( name='rtc_seconds',   coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
