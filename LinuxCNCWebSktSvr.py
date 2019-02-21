@@ -1356,16 +1356,18 @@ class CommandItem( object ):
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply
 
-    # set the 'seconds' pin of the run_time_clock hal component to zero
-    def zero_run_time_clock( self ):
+
+    # stop the run_time_clock HAL component and set it to 0 seconds
+    def reset_run_time_clock( self ):
         global HAL_INTERFACE
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
-            HAL_INTERFACE.set_p('run_time_clock.seconds', '0')
+            HAL_INTERFACE.set_p('run_time_clock.reset', 'TRUE')
         except Exception as ex:
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
         return reply 
+
 
     # writes the specified HAL file to disk
     def put_hal_file( self, filename, data ):
@@ -1539,8 +1541,8 @@ class CommandItem( object ):
                     reply = self.toggle_v1_v2revP()
                 elif (self.name == 'add_user'):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
-                elif (self.name == 'zero_rtc'):
-                    reply = self.zero_run_time_clock()
+                elif (self.name == 'reset_clock'):
+                    reply = self.reset_run_time_clock()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1558,7 +1560,7 @@ class CommandItem( object ):
 CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='zero_rtc',     paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
