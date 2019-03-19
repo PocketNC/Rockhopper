@@ -154,11 +154,26 @@ class LinuxCNCStatusPoller(object):
         except:
           self.hss_aborted_pin = None
  
-        try:
-          self.rtc_seconds_pin = machinekit.hal.Pin("run_time_clock.seconds")
-        except:
-          self.rtc_seconds_pin = None
-               
+        rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
+        has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
+        if has_rtc:
+          safetyCounter = 0
+          while True:
+            try:
+              self.rtc_seconds_pin = machinekit.hal.Pin("run_time_clock.seconds")
+              break
+            except:
+              safetyCounter += 1
+              if(safetyCounter > 1000):
+                  break
+              time.sleep(0.1)
+        
+        self.axis_velocities = {}
+        for n in range(5):
+          print n
+          self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
+        
+
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
         self.sig_dict = {}
@@ -414,6 +429,12 @@ class StatusItem( object ):
             print ex
         BackplotLock.release()
         return reply
+
+    def check_if_rotary_motion_only( self ):
+      global LINUXCNCSTATUS
+      is_rotary_motion = LINUXCNCSTATUS.axis_velocities[3].get() != 0 or LINUXCNCSTATUS.axis_velocities[4].get() != 0
+      is_linear_motion = LINUXCNCSTATUS.axis_velocities[0].get() != 0 or LINUXCNCSTATUS.axis_velocities[1].get() != 0 or LINUXCNCSTATUS.axis_velocities[2].get() != 0
+      return (is_rotary_motion) and not is_linear_motion
 
     def read_gcode_file( self, filename ):
         try:
@@ -763,7 +784,10 @@ class StatusItem( object ):
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
                 elif (self.name == 'rtc_seconds'):
-                    ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
+                    if linuxcnc_status_poller.rtc_seconds_pin:
+                        ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
+                elif (self.name == 'rotary_motion_only'):
+                  ret['data'] = self.check_if_rotary_motion_only() 
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -904,7 +928,8 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 
-StatusItem( name='rtc_seconds',   coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
+StatusItem( name='rtc_seconds',              coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
+StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchable=True, valtype='bool',  help='True if any rotational axis is in motion but not any linear axis.').register_in_dict( StatusItems ) 
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
@@ -1476,6 +1501,14 @@ class CommandItem( object ):
                         break
 
             if (self.type == CommandItem.MOTION):
+                # Some values need to be clamped
+                if (self.name == 'maxvel'):
+                    params[0] = max(min(params[0], 1), 0)
+                elif (self.name == 'spindleoverride'):
+                    params[0] = max(min(params[0], 2), 0)
+                elif (self.name == 'feedrate'):
+                    params[0] = max(min(params[0], 2), 0)
+
                 # execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
@@ -2269,9 +2302,6 @@ def main():
         print "Options: ", options
         print "Arguments: ", args[0]
 
-    instance_number = random()
-    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
-
     if ( int(options.verbose) > 4):
         print "Parsing INI File Name"
 
@@ -2284,6 +2314,9 @@ def main():
     if ( int(options.verbose) > 4):
         print "INI File: ", INI_FILENAME
 
+
+    instance_number = random()
+    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
     logging.basicConfig(filename=os.path.join(application_path,'linuxcnc_webserver.log'),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
  
