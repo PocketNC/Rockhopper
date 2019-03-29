@@ -149,11 +149,20 @@ class LinuxCNCStatusPoller(object):
         self.observers = []
         self.hal_observers = []
 
-        try:
-          self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
-        except:
-          self.hss_aborted_pin = None
-        
+        hss_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'HIGH_SPEED_SPINDLE')
+        self.is_hss = len(hss_ini_data['parameters']) > 0 and hss_ini_data['parameters'][0]['values']['value'] == '1'
+        if self.is_hss:
+          # wait here until the hss userspace components are loaded
+          while True:
+            try:
+              self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
+              self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
+              self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
+              self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
+              break;
+            except:
+              time.sleep(0.1)
+
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
         self.sig_dict = {}
@@ -262,15 +271,44 @@ class LinuxCNCStatusPoller(object):
             return
 
         if self.hss_aborted_pin and self.hss_aborted_pin.get():
+          if self.hss_full_warmup_pin and self.hss_full_warmup_pin.get():
+            lastLCNCerror = { 
+              "kind": "spindle_warmpup", 
+              "type":"error", 
+              "text": "You must run the full spindle warm up sequence (approx. 50 minutes) since it hasn't been turned on in over 1 week.", 
+              "time":strftime("%Y-%m-%d %H:%M:%S"), 
+              "id":self.errorid 
+            }
+          else:
+            lastLCNCerror = { 
+              "kind": "spindle_warmpup", 
+              "type":"error", 
+              "text": "You must run the short spindle warm up sequence (approx. 10 minutes) since it hasn't been turned on in over 12 hours.", 
+              "time":strftime("%Y-%m-%d %H:%M:%S"), 
+              "id":self.errorid 
+            }
+          self.errorid += 1
+          self.hss_aborted_pin.set(0);
+        elif self.hss_p_abort_pin and self.hss_p_abort_pin.get():
           lastLCNCerror = { 
-            "kind": "spindle_warmpup", 
+            "kind": "spindle_pressure", 
             "type":"error", 
-            "text": "You must run the spindle warm up sequence since it hasn't been turned on in over 12 hours.", 
+            "text": "Spindle air supply pressure below minimum 20 PSI (0.138 MPA).", 
             "time":strftime("%Y-%m-%d %H:%M:%S"), 
             "id":self.errorid 
           }
           self.errorid += 1
-          self.hss_aborted_pin.set(0);
+          self.hss_p_abort_pin.set(0);
+        elif self.hss_t_abort_pin and self.hss_t_abort_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_temperature", 
+            "type":"error", 
+            "text": "Ambient temperature is outside the spindle's safe operating range of 32-104F (0-40C).", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_t_abort_pin.set(0);
         else:
           if ( (self.linuxcnc_errors is None) ):
               self.linuxcnc_errors = linuxcnc.error_channel()
@@ -875,7 +913,11 @@ StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
+StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.detected',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates if environmental sensors for high speed spindle are detected' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
@@ -2246,12 +2288,6 @@ def main():
         print "Options: ", options
         print "Arguments: ", args[0]
 
-    instance_number = random()
-    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
-
-    if ( int(options.verbose) > 4):
-        print "Parsing INI File Name"
-
     if len(args) < 1:
         INI_FILENAME = "%s/Settings/PocketNC.ini" % POCKETNC_DIRECTORY
     else:
@@ -2261,6 +2297,11 @@ def main():
     if ( int(options.verbose) > 4):
         print "INI File: ", INI_FILENAME
 
+    if ( int(options.verbose) > 4):
+        print "Parsing INI File Name"
+
+    instance_number = random()
+    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
     logging.basicConfig(filename=os.path.join(application_path,'linuxcnc_webserver.log'),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
  
@@ -2292,9 +2333,6 @@ def main():
 # auto start if executed from the command line
 if __name__ == "__main__":
 
-    try:
-        main()
-    except Exception as ex:
-        print ex
+    main()
             
 
