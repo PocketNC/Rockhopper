@@ -161,7 +161,13 @@ class LinuxCNCStatusPoller(object):
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
               break;
             except:
-              time.sleep(0.1)
+              time.sleep(.1)
+        else:
+          self.hss_aborted_pin = None
+          self.hss_full_warmup_pin = None
+          self.hss_p_abort_pin = None
+          self.hss_t_abort_pin = None
+ 
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -269,9 +275,8 @@ class LinuxCNCStatusPoller(object):
 
         if (self.linuxcnc_is_alive is False):
             return
-
-        if self.hss_aborted_pin and self.hss_aborted_pin.get():
-          if self.hss_full_warmup_pin and self.hss_full_warmup_pin.get():
+        if (self.hss_aborted_pin is not None) and self.hss_aborted_pin.get():
+          if (self.hss_full_warmup_pin is not None) and self.hss_full_warmup_pin.get():
             lastLCNCerror = { 
               "kind": "spindle_warmpup", 
               "type":"error", 
@@ -289,7 +294,7 @@ class LinuxCNCStatusPoller(object):
             }
           self.errorid += 1
           self.hss_aborted_pin.set(0);
-        elif self.hss_p_abort_pin and self.hss_p_abort_pin.get():
+        elif (self.hss_p_abort_pin is not None) and self.hss_p_abort_pin.get():
           lastLCNCerror = { 
             "kind": "spindle_pressure", 
             "type":"error", 
@@ -299,7 +304,7 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_p_abort_pin.set(0);
-        elif self.hss_t_abort_pin and self.hss_t_abort_pin.get():
+        elif (self.hss_t_abort_pin is not None) and self.hss_t_abort_pin.get():
           lastLCNCerror = { 
             "kind": "spindle_temperature", 
             "type":"error", 
@@ -2333,6 +2338,9 @@ def main():
 # auto start if executed from the command line
 if __name__ == "__main__":
 
-    main()
+    try:
+        main()
+    except Exception as ex:
+        print ex
             
 
