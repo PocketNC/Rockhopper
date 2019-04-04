@@ -2338,9 +2338,6 @@ def main():
 # auto start if executed from the command line
 if __name__ == "__main__":
 
-    try:
-        main()
-    except Exception as ex:
-        print ex
-            
+    main()
+
 
