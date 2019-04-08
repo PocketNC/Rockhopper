@@ -117,6 +117,8 @@ lastBackplotData = ""
 BackplotLock = threading.Lock() 
 
 uploadingFile = None
+pressureData = []
+temperatureData = []
 
 # *****************************************************
 # Class to poll linuxcnc for status.  Other classes can request to be notified
@@ -453,6 +455,36 @@ class StatusItem( object ):
         BackplotLock.release()
         return reply
 
+
+    def update_hss_sensor_data( self, new_reading, data_list, large_change_threshold ):
+      try:
+        newReading = float(new_reading)
+        # Always add to list if it is empty
+        if not data_list:
+          data_list.append([time.time(), newReading])
+          return
+
+        mostRecentReadingTime = data_list[-1][0]
+        nowTime = time.time()
+        # We want at least one reading per minute
+        shouldAppend = (nowTime - mostRecentReadingTime) > 60
+
+        # Always save reading if magnitude of change is large enough
+        if not shouldAppend:
+          change = newReading - data_list[-1][1]
+          shouldAppend = abs(change) > large_change_threshold
+
+        if shouldAppend:
+          data_list.append([nowTime, newReading])
+
+        # Remove any data points older than 1 hour
+        while ( nowTime - data_list[0][0] ) > 3600:
+          data_list.pop(0)
+
+      except Exception as ex:
+        print ex
+
+
     def read_gcode_file( self, filename ):
         try:
             f = open(filename, 'r')
@@ -750,6 +782,11 @@ class StatusItem( object ):
                         ret['data'] = linuxcnc_status_poller.pin_dict.get( self.name[7:], LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER )
                         if ( ret['data'] == LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER ):
                             ret['code'] = ret['data']
+                        if self.name.find('halpin_hss_sensors') is 0:
+                            if( self.name.find('pressure') != -1 ):
+                              self.update_hss_sensor_data(ret['data'], pressureData, 0.001)
+                            elif( self.name.find('temperature') != -1 ):
+                              self.update_hss_sensor_data(ret['data'], temperatureData, 0.1)
                     finally:
                         linuxcnc_status_poller.hal_mutex.release()
                 elif (self.name.find('halsig_') is 0):
@@ -800,6 +837,10 @@ class StatusItem( object ):
                     ret['data'] = subprocess.check_output(['cat', '/etc/dogtag']).strip()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
+                elif (self.name == 'pressure_data'):
+                    ret['data'] = pressureData[:]
+                elif (self.name == 'temperature_data'):
+                    ret['data'] = temperatureData[:]
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -918,13 +959,17 @@ StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
+StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
+
 StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.detected',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates if environmental sensors for high speed spindle are detected' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
+StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Pressure data history, back as far as one hour' ).register_in_dict( StatusItems )
+StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Temperature data history, back as far as one hour. Key is timestamp.' ).register_in_dict( StatusItems )
+
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
@@ -1326,6 +1371,7 @@ class CommandItem( object ):
         except Exception as ex:
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        return reply
 
 
     #start: T for initial chunk of file
