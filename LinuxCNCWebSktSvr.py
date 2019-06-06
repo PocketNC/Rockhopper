@@ -432,9 +432,16 @@ class StatusItem( object ):
 
     def check_if_rotary_motion_only( self ):
       global LINUXCNCSTATUS
-      is_rotary_motion = LINUXCNCSTATUS.axis_velocities[3].get() != 0 or LINUXCNCSTATUS.axis_velocities[4].get() != 0
-      is_linear_motion = LINUXCNCSTATUS.axis_velocities[0].get() != 0 or LINUXCNCSTATUS.axis_velocities[1].get() != 0 or LINUXCNCSTATUS.axis_velocities[2].get() != 0
-      return (is_rotary_motion) and not is_linear_motion
+      epsilon = 0.000001
+      
+      is_linear_motion = abs(LINUXCNCSTATUS.axis_velocities[0].get()) > epsilon
+      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[1].get()) > epsilon
+      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[2].get()) > epsilon
+
+      is_rotary_motion = abs(LINUXCNCSTATUS.axis_velocities[3].get()) > epsilon
+      is_rotary_motion |= abs(LINUXCNCSTATUS.axis_velocities[4].get()) > epsilon
+
+      return is_rotary_motion and not is_linear_motion
 
     def read_gcode_file( self, filename ):
         try:
