@@ -168,6 +168,26 @@ class LinuxCNCStatusPoller(object):
           self.hss_p_abort_pin = None
           self.hss_t_abort_pin = None
  
+ 
+        rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
+        has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
+        if has_rtc:
+          safetyCounter = 0
+          while True:
+            try:
+              self.rtc_seconds_pin = machinekit.hal.Pin("run_time_clock.seconds")
+              break
+            except:
+              safetyCounter += 1
+              if(safetyCounter > 1000):
+                  break
+              time.sleep(0.1)
+        
+        self.axis_velocities = {}
+        for n in range(5):
+          print n
+          self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
+        
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -452,6 +472,19 @@ class StatusItem( object ):
             print ex
         BackplotLock.release()
         return reply
+
+    def check_if_rotary_motion_only( self ):
+      global LINUXCNCSTATUS
+      epsilon = 0.000001
+      
+      is_linear_motion = abs(LINUXCNCSTATUS.axis_velocities[0].get()) > epsilon
+      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[1].get()) > epsilon
+      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[2].get()) > epsilon
+
+      is_rotary_motion = abs(LINUXCNCSTATUS.axis_velocities[3].get()) > epsilon
+      is_rotary_motion |= abs(LINUXCNCSTATUS.axis_velocities[4].get()) > epsilon
+
+      return is_rotary_motion and not is_linear_motion
 
     def read_gcode_file( self, filename ):
         try:
@@ -800,6 +833,11 @@ class StatusItem( object ):
                     ret['data'] = subprocess.check_output(['cat', '/etc/dogtag']).strip()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
+                elif (self.name == 'rtc_seconds'):
+                    if linuxcnc_status_poller.rtc_seconds_pin:
+                        ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
+                elif (self.name == 'rotary_motion_only'):
+                  ret['data'] = self.check_if_rotary_motion_only() 
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -943,6 +981,9 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
+
+StatusItem( name='rtc_seconds',              coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
+StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchable=True, valtype='bool',  help='True if any rotational axis is in motion but not any linear axis.').register_in_dict( StatusItems ) 
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
@@ -1395,6 +1436,18 @@ class CommandItem( object ):
         return reply
 
 
+    # stop the run_time_clock HAL component and set it to 0 seconds
+    def reset_run_time_clock( self ):
+        global HAL_INTERFACE
+        reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+        try:
+            HAL_INTERFACE.set_p('run_time_clock.reset', 'TRUE')
+        except Exception as ex:
+            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+
+        return reply 
+
+
     # writes the specified HAL file to disk
     def put_hal_file( self, filename, data ):
         global INI_FILENAME
@@ -1502,6 +1555,14 @@ class CommandItem( object ):
                         break
 
             if (self.type == CommandItem.MOTION):
+                # Some values need to be clamped
+                if (self.name == 'maxvel'):
+                    params[0] = max(min(params[0], 1), 0)
+                elif (self.name == 'spindleoverride'):
+                    params[0] = max(min(params[0], 2), 0)
+                elif (self.name == 'feedrate'):
+                    params[0] = max(min(params[0], 2), 0)
+
                 # execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
@@ -1567,6 +1628,8 @@ class CommandItem( object ):
                     reply = self.toggle_v1_v2revP()
                 elif (self.name == 'add_user'):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
+                elif (self.name == 'reset_clock'):
+                    reply = self.reset_run_time_clock()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1584,7 +1647,7 @@ class CommandItem( object ):
 CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-
+CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
@@ -2293,6 +2356,9 @@ def main():
         print "Options: ", options
         print "Arguments: ", args[0]
 
+    if ( int(options.verbose) > 4):
+        print "Parsing INI File Name"
+
     if len(args) < 1:
         INI_FILENAME = "%s/Settings/PocketNC.ini" % POCKETNC_DIRECTORY
     else:
@@ -2304,6 +2370,9 @@ def main():
 
     if ( int(options.verbose) > 4):
         print "Parsing INI File Name"
+
+    instance_number = random()
+    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
