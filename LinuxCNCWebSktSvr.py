@@ -2401,9 +2401,6 @@ def main():
         print "Options: ", options
         print "Arguments: ", args[0]
 
-    if ( int(options.verbose) > 4):
-        print "Parsing INI File Name"
-
     if len(args) < 1:
         INI_FILENAME = "%s/Settings/PocketNC.ini" % POCKETNC_DIRECTORY
     else:
@@ -2415,9 +2412,6 @@ def main():
 
     if ( int(options.verbose) > 4):
         print "Parsing INI File Name"
-
-    instance_number = random()
-    LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
