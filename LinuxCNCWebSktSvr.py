@@ -117,8 +117,6 @@ lastBackplotData = ""
 BackplotLock = threading.Lock() 
 
 uploadingFile = None
-pressureData = []
-temperatureData = []
 
 # *****************************************************
 # Class to poll linuxcnc for status.  Other classes can request to be notified
@@ -170,26 +168,6 @@ class LinuxCNCStatusPoller(object):
           self.hss_p_abort_pin = None
           self.hss_t_abort_pin = None
  
- 
-        rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
-        has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
-        if has_rtc:
-          safetyCounter = 0
-          while True:
-            try:
-              self.rtc_seconds_pin = machinekit.hal.Pin("run_time_clock.seconds")
-              break
-            except:
-              safetyCounter += 1
-              if(safetyCounter > 1000):
-                  break
-              time.sleep(0.1)
-        
-        self.axis_velocities = {}
-        for n in range(5):
-          print n
-          self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
-        
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -475,48 +453,6 @@ class StatusItem( object ):
         BackplotLock.release()
         return reply
 
-    def check_if_rotary_motion_only( self ):
-      global LINUXCNCSTATUS
-      epsilon = 0.000001
-      
-      is_linear_motion = abs(LINUXCNCSTATUS.axis_velocities[0].get()) > epsilon
-      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[1].get()) > epsilon
-      is_linear_motion |= abs(LINUXCNCSTATUS.axis_velocities[2].get()) > epsilon
-
-      is_rotary_motion = abs(LINUXCNCSTATUS.axis_velocities[3].get()) > epsilon
-      is_rotary_motion |= abs(LINUXCNCSTATUS.axis_velocities[4].get()) > epsilon
-
-      return is_rotary_motion and not is_linear_motion
-
-    def update_hss_sensor_data( self, new_reading, data_list, large_change_threshold ):
-      try:
-        newReading = float(new_reading)
-        # Always add to list if it is empty
-        if not data_list:
-          data_list.append([time.time(), newReading])
-          return
-
-        mostRecentReadingTime = data_list[-1][0]
-        nowTime = time.time()
-        # We want at least one reading per minute
-        shouldAppend = (nowTime - mostRecentReadingTime) > 60
-
-        # Always save reading if magnitude of change is large enough
-        if not shouldAppend:
-          change = newReading - data_list[-1][1]
-          shouldAppend = abs(change) > large_change_threshold
-
-        if shouldAppend:
-          data_list.append([nowTime, newReading])
-
-        # Remove any data points older than 1 hour
-        while ( nowTime - data_list[0][0] ) > 3600:
-          data_list.pop(0)
-
-      except Exception as ex:
-        print ex
-
-
     def read_gcode_file( self, filename ):
         try:
             f = open(filename, 'r')
@@ -707,6 +643,30 @@ class StatusItem( object ):
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
 
+    #adapted from http://code.activestate.com/recipes/577879-create-a-nested-dictionary-from-oswalk/
+    def map_usb_files( self ):
+        try:
+            usbDir = "/media/usb"
+            usbMap = {}
+            if( not os.path.exists(usbDir) or len(os.listdir(usbDir)) == 0):
+                usbMap["detected"] = False
+            else:
+                usbMap["detected"] = True
+                start = usbDir.rfind(os.sep) + 1
+                for path, dirs, files in os.walk(usbDir):
+                    #leave out hidden dirs
+                    dirs[:] = [d for d in dirs if not d[0] == '.']
+                    #and leave out hidden and non-ngc files
+                    files = [f for f in files if ( not f[0] == '.' and f[-4:].lower() == '.ngc')]
+                    folders = path[start:].split(os.sep)
+                    subdir = dict.fromkeys(files)
+                    parent = reduce(dict.get, folders[:-1], usbMap)
+                    parent[folders[-1]] = subdir
+        except Exception as e:
+            code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+            ret["data"] = e.message
+        return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":usbMap }
+
     def get_users( self ):
         global userdict
         return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":userdict.keys() }
@@ -814,11 +774,6 @@ class StatusItem( object ):
                         ret['data'] = linuxcnc_status_poller.pin_dict.get( self.name[7:], LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER )
                         if ( ret['data'] == LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER ):
                             ret['code'] = ret['data']
-                        if self.name.find('halpin_hss_sensors') is 0:
-                            if( self.name.find('pressure') != -1 ):
-                              self.update_hss_sensor_data(ret['data'], pressureData, 0.001)
-                            elif( self.name.find('temperature') != -1 ):
-                              self.update_hss_sensor_data(ret['data'], temperatureData, 0.1)
                     finally:
                         linuxcnc_status_poller.hal_mutex.release()
                 elif (self.name.find('halsig_') is 0):
@@ -843,6 +798,8 @@ class StatusItem( object ):
                     ret = self.get_current_version()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
+                elif (self.name == 'usb'):
+                    ret = self.map_usb_files()
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
@@ -869,15 +826,6 @@ class StatusItem( object ):
                     ret['data'] = subprocess.check_output(['cat', '/etc/dogtag']).strip()
                 elif (self.name == 'error'):
                     ret['data'] = lastLCNCerror
-                elif (self.name == 'rtc_seconds'):
-                    if linuxcnc_status_poller.rtc_seconds_pin:
-                        ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
-                elif (self.name == 'rotary_motion_only'):
-                  ret['data'] = self.check_if_rotary_motion_only() 
-                elif (self.name == 'pressure_data'):
-                    ret['data'] = pressureData[:]
-                elif (self.name == 'temperature_data'):
-                    ret['data'] = temperatureData[:]
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -996,18 +944,16 @@ StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
-StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
-
 StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.detected',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates if environmental sensors for high speed spindle are detected' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
-StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Pressure data history, back as far as one hour' ).register_in_dict( StatusItems )
-StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Temperature data history, back as far as one hour. Key is timestamp.' ).register_in_dict( StatusItems )
-
+StatusItem( name='halpin_halui.max-velocity.value',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='maxvelocity' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Measured spindle speed using clock pin' ).register_in_dict( StatusItems )
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
+StatusItem( name='usb',                      coreLinuxCNCVariable=False, watchable=True, valtype='dict',help='Create a nested dictionary that represents the folder structure of an usb device that has been mounted at /media/usb' ).register_in_dict( StatusItems )
+
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
@@ -1025,9 +971,6 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
-
-StatusItem( name='rtc_seconds',              coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
-StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchable=True, valtype='bool',  help='True if any rotational axis is in motion but not any linear axis.').register_in_dict( StatusItems ) 
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
@@ -1411,7 +1354,6 @@ class CommandItem( object ):
         except Exception as ex:
             print ex
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-        return reply
 
 
     #start: T for initial chunk of file
@@ -1481,18 +1423,6 @@ class CommandItem( object ):
         return reply
 
 
-    # stop the run_time_clock HAL component and set it to 0 seconds
-    def reset_run_time_clock( self ):
-        global HAL_INTERFACE
-        reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
-        try:
-            HAL_INTERFACE.set_p('run_time_clock.reset', 'TRUE')
-        except Exception as ex:
-            reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-
-        return reply 
-
-
     # writes the specified HAL file to disk
     def put_hal_file( self, filename, data ):
         global INI_FILENAME
@@ -1522,6 +1452,27 @@ class CommandItem( object ):
         
         return reply 
     
+    # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it
+    def eject_usb( self ):
+      global lastLCNCerror
+      reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+      try:
+        #attempt to kill any processes using the drive
+        procs = subprocess.call(['sudo', 'fuser', '-vmk', '/media/usb'], stderr=subprocess.STDOUT )
+        returncode = subprocess.call(['sudo', 'umount', '/media/usb'])
+        if returncode != 0:
+          lastLCNCerror = { 
+            "kind": "eject_usb", 
+            "type":"error",
+            "text": "Unable to eject USB device, %s" % (procs), 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id": LINUXCNCSTATUS.errorid + 1  
+          }
+          LINUXCNCSTATUS.errorid += 1
+      except Exception as ex:
+        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+      
+      return reply 
 
     def restart_linuxcnc_and_rockhopper( self ):
         global POCKETNC_DIRECTORY
@@ -1600,14 +1551,6 @@ class CommandItem( object ):
                         break
 
             if (self.type == CommandItem.MOTION):
-                # Some values need to be clamped
-                if (self.name == 'maxvel'):
-                    params[0] = max(min(params[0], 1), 0)
-                elif (self.name == 'spindleoverride'):
-                    params[0] = max(min(params[0], 2), 0)
-                elif (self.name == 'feedrate'):
-                    params[0] = max(min(params[0], 2), 0)
-
                 # execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
@@ -1673,8 +1616,8 @@ class CommandItem( object ):
                     reply = self.toggle_v1_v2revP()
                 elif (self.name == 'add_user'):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
-                elif (self.name == 'reset_clock'):
-                    reply = self.reset_run_time_clock()
+                elif (self.name == 'eject_usb'):
+                    reply = self.eject_usb()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1692,7 +1635,7 @@ class CommandItem( object ):
 CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
@@ -1751,7 +1694,7 @@ CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'vers
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-
+CommandItem( name='eject_usb',                paramTypes=[ ],       help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='shutdown_computer',                paramTypes=[ ],       help='Shutdown the computer.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='restart',          isasync=True, paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
@@ -2416,12 +2359,16 @@ def main():
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
-    logging.basicConfig(filename=os.path.join(application_path,'linuxcnc_webserver.log'),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
+    log_exists = os.path.isfile("/var/log/linuxcnc_webserver.log")
+    if not log_exists:
+        subprocess.call(['sudo', 'touch', "/var/log/linuxcnc_webserver.log"])
+        subprocess.call(['sudo', 'chmod', '666', "/var/log/linuxcnc_webserver.log"])
+    logging.basicConfig(filename=os.path.join("/var/log/linuxcnc_webserver.log"),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
  
     #rpdb2.start_embedded_debugger("password")
 
     readUserList()
-
+    logging.error('an error yo')
     logging.info("Starting linuxcnc http server...")
     print "Starting Rockhopper linuxcnc http server."
 
