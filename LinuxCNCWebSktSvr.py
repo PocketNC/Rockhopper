@@ -707,6 +707,31 @@ class StatusItem( object ):
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
 
+    #adapted from http://code.activestate.com/recipes/577879-create-a-nested-dictionary-from-oswalk/
+    def map_usb_files( self ):
+      try:
+        usbDir = "/media/usb"
+        usbMap = {}
+        if( not os.path.exists(usbDir) or len(os.listdir(usbDir)) == 0):
+          usbMap["detected"] = False
+        else:
+          usbMap["detected"] = True
+          start = usbDir.rfind(os.sep) + 1
+          for path, dirs, files in os.walk(usbDir):
+            #leave out hidden dirs
+            dirs[:] = [d for d in dirs if not d[0] == '.']
+            #and leave out hidden and non-ngc files
+            files = [f for f in files if ( not f[0] == '.' and f[-4:].lower() == '.ngc')]
+            folders = path[start:].split(os.sep)
+            subdir = dict.fromkeys(files)
+            parent = reduce(dict.get, folders[:-1], usbMap)
+            parent[folders[-1]] = subdir
+      except Exception as e:
+        code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        ret["data"] = e.message
+      return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":usbMap }
+
+
     def get_users( self ):
         global userdict
         return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":userdict.keys() }
@@ -843,6 +868,8 @@ class StatusItem( object ):
                     ret = self.get_current_version()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
+                elif (self.name == 'usb'):
+                    ret = self.map_usb_files()
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
@@ -1008,6 +1035,7 @@ StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchab
 StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Temperature data history, back as far as one hour. Key is timestamp.' ).register_in_dict( StatusItems )
 
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
+StatusItem( name='usb',                      coreLinuxCNCVariable=False, watchable=True, valtype='dict',help='Create a nested dictionary that represents the folder structure of an usb device that has been mounted at /media/usb' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
@@ -1522,6 +1550,27 @@ class CommandItem( object ):
         
         return reply 
     
+    # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it
+    def eject_usb( self ):
+      global lastLCNCerror
+      reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+      try:
+        #attempt to kill any processes using the drive
+        procs = subprocess.call(['sudo', 'fuser', '-vmk', '/media/usb'], stderr=subprocess.STDOUT )
+        returncode = subprocess.call(['sudo', 'umount', '/media/usb'])
+        if returncode != 0:
+          lastLCNCerror = { 
+            "kind": "eject_usb", 
+            "type":"error",
+            "text": "Unable to eject USB device, %s" % (procs), 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id": LINUXCNCSTATUS.errorid + 1  
+          }
+          LINUXCNCSTATUS.errorid += 1
+      except Exception as ex:
+        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+      
+      return reply 
 
     def restart_linuxcnc_and_rockhopper( self ):
         global POCKETNC_DIRECTORY
@@ -1675,6 +1724,8 @@ class CommandItem( object ):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
                 elif (self.name == 'reset_clock'):
                     reply = self.reset_run_time_clock()
+                elif (self.name == 'eject_usb'):
+                    reply = self.eject_usb()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1693,6 +1744,7 @@ CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
@@ -2416,7 +2468,11 @@ def main():
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
-    logging.basicConfig(filename=os.path.join(application_path,'linuxcnc_webserver.log'),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
+    log_exists = os.path.isfile("/var/log/linuxcnc_webserver.log")
+    if not log_exists:
+        subprocess.call(['sudo', 'touch', "/var/log/linuxcnc_webserver.log"])
+        subprocess.call(['sudo', 'chmod', '666', "/var/log/linuxcnc_webserver.log"])
+    logging.basicConfig(filename=os.path.join("/var/log/linuxcnc_webserver.log"),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
  
     #rpdb2.start_embedded_debugger("password")
 
