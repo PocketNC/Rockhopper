@@ -159,7 +159,7 @@ class LinuxCNCStatusPoller(object):
               self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
               self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
-              break;
+              break
             except:
               time.sleep(.1)
         else:
@@ -167,7 +167,22 @@ class LinuxCNCStatusPoller(object):
           self.hss_full_warmup_pin = None
           self.hss_p_abort_pin = None
           self.hss_t_abort_pin = None
- 
+
+        interlock_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'INTERLOCK')
+        self.has_interlock = len(interlock_ini_data['parameters']) > 0 and interlock_ini_data['parameters'][0]['values']['value'] == '1'
+        if self.has_interlock:
+          while True:
+            try:
+              self.interlock_prog_alert_pin = machinekit.hal.Pin("interlock.prog-alert")
+              self.interlock_spindle_alert_pin = machinekit.hal.Pin("interlock.spindle-alert")
+              self.interlock_exception_alert_pin = machinekit.hal.Pin("interlock.exception-alert")
+              break
+            except:
+              time.sleep(.01)
+          else:
+            self.interlock_alert_pin = None
+            self.interlock_spindle_alert_pin = None
+            self.interlock_exception_alert_pin = None
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -271,8 +286,9 @@ class LinuxCNCStatusPoller(object):
         self.hal_thread.start()
 
     def poll_update_errors(self):
-        global lastLCNCerror
+      global lastLCNCerror
 
+      try:
         if (self.linuxcnc_is_alive is False):
             return
         if (self.hss_aborted_pin is not None) and self.hss_aborted_pin.get():
@@ -314,6 +330,36 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
+        elif (self.interlock_prog_alert_pin is not None) and self.interlock_prog_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock", 
+            "type":"error", 
+            "text": "Enclosure opened while running program, machine has been paused.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_prog_alert_pin.set(0)
+        elif (self.interlock_spindle_alert_pin is not None) and self.interlock_spindle_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_spindle", 
+            "type":"error",
+            "text": "Enclosure opened while spindle in motion, spindle has been paused.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"),
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_spindle_alert_pin.set(0)
+        elif (self.interlock_exception_alert_pin is not None) and self.interlock_exception_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_exception", 
+            "type":"error",
+            "text": "An exception has occured in the interlock HAL component, machine has been E-stopped as a precaution.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"),
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_exception_alert_pin.set(0)  
         else:
           if ( (self.linuxcnc_errors is None) ):
               self.linuxcnc_errors = linuxcnc.error_channel()
@@ -331,6 +377,8 @@ class LinuxCNCStatusPoller(object):
                   self.errorid = self.errorid + 1 
           except:
               pass
+      except Exception as e:
+        print e
 
     def poll_update(self):
         global linuxcnc_command
@@ -380,6 +428,7 @@ class StatusItem( object ):
         self.requiresLinuxCNCUp = requiresLinuxCNCUp
         self.coreLinuxCNCVariable = coreLinuxCNCVariable
         self.isasync = isAsync
+        self.value = None
 
     @staticmethod
     def from_name( name ):
@@ -806,9 +855,15 @@ class StatusItem( object ):
                     ret['data'] = (linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name ))[item_index]
                 else:
                     ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
+                    # if(self.name == 'paused') or (self.name == "task_paused"):
+                    #   print self.name
+                    #   print ret['data']
+                    #   print 'and task paused is... %s' % (linuxcnc_status_poller.linuxcnc_status.__getattribute__( 'task_paused' ))
+
         except Exception as ex :
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret['data'] = ''
+        self.value = ret
         return ret
 
 tool_table_entry_type = type( linuxcnc.stat().tool_table[0] )
@@ -943,6 +998,8 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
+StatusItem( name='halsig_interlockClosed',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='Monitors status of interlock. Also true if not equipped with interlock.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_interlock.spindle-paused-by-interlock',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='True if the spindle is paused, and the pause is the result of opening interlock' ).register_in_dict( StatusItems )
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
@@ -1432,6 +1489,15 @@ class CommandItem( object ):
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+    
+    def resume_spindle_after_interlock( self ):
+        try:
+            print 'trying to resume'
+            machinekit.hal.Pin("interlock.spindle-resume").set(1)
+            return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        except Exception as e:
+            print e
+            return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
     def shutdown_linuxcnc( self ):
         try:
@@ -1473,6 +1539,9 @@ class CommandItem( object ):
         global lastLCNCerror
         global linuxcnc_command
 
+        if( self.name == 'halcmd'):
+          print passed_command_dict
+
         try:
             paramcnt = 0
             params = []
@@ -1502,6 +1571,38 @@ class CommandItem( object ):
                         break
 
             if (self.type == CommandItem.MOTION):
+                # If attempting to start, single-step, or resume a program, check that the interlock is closed
+                if (self.name == 'auto') and (params[0] in [0,1,2]):
+                    print self.name
+                    print params
+                    #problem here is that we are not storing the value of all items in memory at all times. Testing required before use
+                    try:
+                      print StatusItems['halsig_interlockClosed'].value['data']
+                      if StatusItems['halsig_interlockClosed'].value['data'] == 'FALSE':
+                        lastLCNCerror = {
+                          "kind": "interlock",
+                          "type":"warning",
+                          "text": "Enclosure door must be fully closed to run program.",
+                          "time":strftime("%Y-%m-%d %H:%M:%S"),
+                          "id": LINUXCNCSTATUS.errorid 
+                        }
+                        LINUXCNCSTATUS.errorid += 1
+                        return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+                        #this is the proper way to do it, since we don't want to store all the values in memory at all times, but I'm strugging with 
+                        #print interlockStatusItem.get_cur_status_value(linuxcnc_status_poller, 0, passed_command_dict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
+                      elif StatusItems['halpin_interlock.spindle-paused-by-interlock'].value['data'] == 'TRUE':
+                        #This state should only occur if the machine is equipped with the interlock features 
+                        lastLCNCerror = {
+                          "kind": "interlock",
+                          "type":"warning",
+                          "text": "Spindle is in a paused state. The interlock was detected as opened while the spindle was turning. Spindle must be un-paused before a program can be run. If the appropriate button is not visible, clear your browser cache and refresh UI.",
+                          "time":strftime("%Y-%m-%d %H:%M:%S"),
+                          "id": LINUXCNCSTATUS.errorid
+                        }
+                        LINUXCNCSTATUS.errorid += 1
+                        return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+                    except Exception as e:
+                      print e
                 # execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
@@ -1537,6 +1638,8 @@ class CommandItem( object ):
                     reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
                     reply = self.restart_linuxcnc_and_rockhopper()
+                elif (self.name == 'resume_spindle'):
+                    reply = self.resume_spindle_after_interlock()    
                 elif (self.name == 'startup'):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
@@ -1619,6 +1722,7 @@ CommandItem( name='set_optional_stop',       paramTypes=[ {'pname':'onoff', 'pty
 CommandItem( name='set_spindle_override',    paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='set spindle override flag' ).register_in_dict( CommandItems )
 CommandItem( name='spindle',                 paramTypes=[ {'pname':'spindle', 'ptype':'lookup', 'lookup-vals':['SPINDLE_FORWARD','SPINDLE_REVERSE','SPINDLE_OFF','SPINDLE_INCREASE','SPINDLE_DECREASE','SPINDLE_CONSTANT'], 'optional':False} ],      help='set spindle direction.  Legal values: SPINDLE_FORWARD, SPINDLE_REVERSE, SPINDLE_OFF, SPINDLE_INCREASE, SPINDLE_DECREASE, SPINDLE_CONSTANT' ).register_in_dict( CommandItems )
 CommandItem( name='spindleoverride',         paramTypes=[ {'pname':'factor', 'ptype':'float', 'optional':False} ],      help='set spindle override factor' ).register_in_dict( CommandItems )
+CommandItem( name='resume_spindle',          paramTypes=[  ],      help='resumes spindle after it has been inhibited by opening of interlock. only necessary if the spindle was in motion when the interlock was opened', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='state',                   paramTypes=[ {'pname':'state', 'ptype':'lookup', 'lookup-vals':['STATE_ESTOP','STATE_ESTOP_RESET','STATE_ON','STATE_OFF'], 'optional':False} ],      help='set the machine state.  Legal values: STATE_ESTOP_RESET, STATE_ESTOP, STATE_ON, STATE_OFF' ).register_in_dict( CommandItems )
 CommandItem( name='teleop_enable',           paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='enable/disable teleop mode' ).register_in_dict( CommandItems )
 CommandItem( name='teleop_vector',           paramTypes=[ {'pname':'p1', 'ptype':'float', 'optional':False}, {'pname':'p2', 'ptype':'float', 'optional':False}, {'pname':'p3', 'ptype':'float', 'optional':False}, {'pname':'p4', 'ptype':'float', 'optional':True}, {'pname':'p5', 'ptype':'float', 'optional':True}, {'pname':'p6', 'ptype':'float', 'optional':True} ],      help='set teleop destination vector' ).register_in_dict( CommandItems )
