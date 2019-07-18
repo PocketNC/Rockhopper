@@ -332,15 +332,17 @@ class LinuxCNCStatusPoller(object):
           self.hss_t_abort_pin.set(0);
         elif (self.interlock_prog_alert_pin is not None) and self.interlock_prog_alert_pin.get():
           lastLCNCerror = { 
-            "kind": "interlock", 
+            "kind": "interlock_prog", 
             "type":"error", 
-            "text": "Enclosure opened while running program, machine has been paused.",
+            "text": "Enclosure opened while running program, program has been paused.",
             "time":strftime("%Y-%m-%d %H:%M:%S"), 
             "id":self.errorid
           }
           self.errorid += 1
           self.interlock_prog_alert_pin.set(0)
-        elif (self.interlock_spindle_alert_pin is not None) and self.interlock_spindle_alert_pin.get():
+        elif (self.interlock_spindle_alert_pin is not None) and self.interlock_spindle_alert_pin.get() and not (isinstance(lastLCNCerror, dict) and lastLCNCerror['kind'] == 'interlock_prog'):
+          # The last two checks are too ensure any interlock program pause alert is delivered before we attempt to send the alert for the spindle pause
+          print 'should see spindle error'
           lastLCNCerror = { 
             "kind": "interlock_spindle", 
             "type":"error",
@@ -428,7 +430,6 @@ class StatusItem( object ):
         self.requiresLinuxCNCUp = requiresLinuxCNCUp
         self.coreLinuxCNCVariable = coreLinuxCNCVariable
         self.isasync = isAsync
-        self.value = None
 
     @staticmethod
     def from_name( name ):
@@ -863,7 +864,6 @@ class StatusItem( object ):
         except Exception as ex :
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret['data'] = ''
-        self.value = ret
         return ret
 
 tool_table_entry_type = type( linuxcnc.stat().tool_table[0] )
@@ -1573,12 +1573,9 @@ class CommandItem( object ):
             if (self.type == CommandItem.MOTION):
                 # If attempting to start, single-step, or resume a program, check that the interlock is closed
                 if (self.name == 'auto') and (params[0] in [0,1,2]):
-                    print self.name
-                    print params
-                    #problem here is that we are not storing the value of all items in memory at all times. Testing required before use
                     try:
-                      print StatusItems['halsig_interlockClosed'].value['data']
-                      if StatusItems['halsig_interlockClosed'].value['data'] == 'FALSE':
+                      linuxcnc_status_poller.hal_mutex.acquire()
+                      if linuxcnc_status_poller.sig_dict.get('interlockClosed') == 'FALSE':
                         lastLCNCerror = {
                           "kind": "interlock",
                           "type":"warning",
@@ -1588,21 +1585,20 @@ class CommandItem( object ):
                         }
                         LINUXCNCSTATUS.errorid += 1
                         return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-                        #this is the proper way to do it, since we don't want to store all the values in memory at all times, but I'm strugging with 
-                        #print interlockStatusItem.get_cur_status_value(linuxcnc_status_poller, 0, passed_command_dict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
-                      elif StatusItems['halpin_interlock.spindle-paused-by-interlock'].value['data'] == 'TRUE':
-                        #This state should only occur if the machine is equipped with the interlock features 
+                      elif linuxcnc_status_poller.pin_dict.get('interlock.spindle-paused-by-interlock') == 'TRUE':
                         lastLCNCerror = {
                           "kind": "interlock",
                           "type":"warning",
-                          "text": "Spindle is in a paused state. The interlock was detected as opened while the spindle was turning. Spindle must be un-paused before a program can be run. If the appropriate button is not visible, clear your browser cache and refresh UI.",
+                          "text": "Spindle has entered a paused state after the interlock was detected as opened while the spindle was turning. Spindle must be un-paused before a program can be run. If the appropriate button is not visible, clear your browser cache and refresh UI.",
                           "time":strftime("%Y-%m-%d %H:%M:%S"),
                           "id": LINUXCNCSTATUS.errorid
                         }
                         LINUXCNCSTATUS.errorid += 1
                         return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
                     except Exception as e:
-                      print e
+                      print e  
+                    finally:
+                      linuxcnc_status_poller.hal_mutex.release()
                 # execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
