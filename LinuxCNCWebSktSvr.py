@@ -341,8 +341,7 @@ class LinuxCNCStatusPoller(object):
           self.errorid += 1
           self.interlock_prog_alert_pin.set(0)
         elif (self.interlock_spindle_alert_pin is not None) and self.interlock_spindle_alert_pin.get() and not (isinstance(lastLCNCerror, dict) and lastLCNCerror['kind'] == 'interlock_prog'):
-          # The last two checks are too ensure any interlock program pause alert is delivered before we attempt to send the alert for the spindle pause
-          print 'should see spindle error'
+          # The checks for type and kind of lastLCNCerror are too ensure any interlock program pause alert is delivered before we attempt to send the alert for the spindle pause
           lastLCNCerror = { 
             "kind": "interlock_spindle", 
             "type":"error",
@@ -1579,7 +1578,7 @@ class CommandItem( object ):
                         lastLCNCerror = {
                           "kind": "interlock",
                           "type":"warning",
-                          "text": "Enclosure door must be fully closed to run program.",
+                          "text": "Enclosure door must be closed to run program.",
                           "time":strftime("%Y-%m-%d %H:%M:%S"),
                           "id": LINUXCNCSTATUS.errorid 
                         }
