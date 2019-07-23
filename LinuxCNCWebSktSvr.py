@@ -161,7 +161,7 @@ class LinuxCNCStatusPoller(object):
               self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
               self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
-              break;
+              break
             except:
               time.sleep(.1)
         else:
@@ -169,8 +169,7 @@ class LinuxCNCStatusPoller(object):
           self.hss_full_warmup_pin = None
           self.hss_p_abort_pin = None
           self.hss_t_abort_pin = None
- 
- 
+
         rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
         has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
         if has_rtc:
@@ -189,7 +188,20 @@ class LinuxCNCStatusPoller(object):
         for n in range(5):
           print n
           self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
-        
+
+        interlock_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'INTERLOCK')
+        self.has_interlock = len(interlock_ini_data['parameters']) > 0 and interlock_ini_data['parameters'][0]['values']['value'] == '1'
+        if self.has_interlock:
+          while True:
+            try:
+              self.interlock_pause_alert_pin = machinekit.hal.Pin("interlock.pause-alert")
+              self.interlock_exception_alert_pin = machinekit.hal.Pin("interlock.exception-alert")
+              break
+            except:
+              time.sleep(.01)
+        else:
+          self.interlock_pause_alert_pin = None
+          self.interlock_exception_alert_pin = None
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -293,8 +305,9 @@ class LinuxCNCStatusPoller(object):
         self.hal_thread.start()
 
     def poll_update_errors(self):
-        global lastLCNCerror
+      global lastLCNCerror
 
+      try:
         if (self.linuxcnc_is_alive is False):
             return
         if (self.hss_aborted_pin is not None) and self.hss_aborted_pin.get():
@@ -336,6 +349,26 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
+        elif (self.interlock_pause_alert_pin is not None) and self.interlock_pause_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_program", 
+            "type":"error", 
+            "text": "Enclosure opened while program running, program has been paused.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_pause_alert_pin.set(0)
+        elif (self.interlock_exception_alert_pin is not None) and self.interlock_exception_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_exception", 
+            "type":"error",
+            "text": "An exception has occured in the interlock HAL component, machine has been E-stopped as a precaution.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"),
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_exception_alert_pin.set(0)  
         else:
           if ( (self.linuxcnc_errors is None) ):
               self.linuxcnc_errors = linuxcnc.error_channel()
@@ -353,6 +386,8 @@ class LinuxCNCStatusPoller(object):
                   self.errorid = self.errorid + 1 
           except:
               pass
+      except Exception as e:
+        print e
 
     def poll_update(self):
         global linuxcnc_command
@@ -884,6 +919,11 @@ class StatusItem( object ):
                     ret['data'] = (linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name ))[item_index]
                 else:
                     ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
+                    # if(self.name == 'paused') or (self.name == "task_paused"):
+                    #   print self.name
+                    #   print ret['data']
+                    #   print 'and task paused is... %s' % (linuxcnc_status_poller.linuxcnc_status.__getattribute__( 'task_paused' ))
+
         except Exception as ex :
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret['data'] = ''
@@ -1025,6 +1065,8 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
+StatusItem( name='halsig_interlockClosed',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='Monitors status of interlock. Also true if not equipped with interlock.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_interlock.program-paused-by-interlock',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.' ).register_in_dict( StatusItems )
 
 StatusItem( name='rtc_seconds',              coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
 StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchable=True, valtype='bool',  help='True if any rotational axis is in motion but not any linear axis.').register_in_dict( StatusItems ) 
@@ -1531,6 +1573,14 @@ class CommandItem( object ):
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
+    def interlock_release( self ):
+        try:
+            machinekit.hal.Pin("interlock.release").set(1)
+            return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        except Exception as e:
+            print e
+            return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
     def shutdown_linuxcnc( self ):
         try:
             displayname = StatusItem.get_ini_data( only_section='DISPLAY', only_name='DISPLAY' )['data']['parameters'][0]['values']['value']
@@ -1570,6 +1620,9 @@ class CommandItem( object ):
         global INI_FILE_PATH
         global lastLCNCerror
         global linuxcnc_command
+
+        if( self.name == 'halcmd'):
+          print passed_command_dict
 
         try:
             paramcnt = 0
@@ -1642,7 +1695,9 @@ class CommandItem( object ):
                 elif (self.name == 'shutdown_computer'):
                     reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
-                    reply = self.restart_linuxcnc_and_rockhopper()
+                    reply = self.restart_linuxcnc_and_rockhopper() 
+                elif (self.name == 'interlock_release'):
+                    reply = self.interlock_release() 
                 elif (self.name == 'startup'):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
@@ -1693,6 +1748,8 @@ CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
