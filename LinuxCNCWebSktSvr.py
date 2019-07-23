@@ -908,7 +908,7 @@ class StatusItem( object ):
                     if linuxcnc_status_poller.rtc_seconds_pin:
                         ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
                 elif (self.name == 'rotary_motion_only'):
-                  ret['data'] = self.check_if_rotary_motion_only() 
+                    ret['data'] = self.check_if_rotary_motion_only() 
                 elif (self.name == 'pressure_data'):
                     ret['data'] = pressureData[:]
                 elif (self.name == 'temperature_data'):
@@ -919,10 +919,6 @@ class StatusItem( object ):
                     ret['data'] = (linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name ))[item_index]
                 else:
                     ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
-                    # if(self.name == 'paused') or (self.name == "task_paused"):
-                    #   print self.name
-                    #   print ret['data']
-                    #   print 'and task paused is... %s' % (linuxcnc_status_poller.linuxcnc_status.__getattribute__( 'task_paused' ))
 
         except Exception as ex :
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
@@ -1621,9 +1617,6 @@ class CommandItem( object ):
         global lastLCNCerror
         global linuxcnc_command
 
-        if( self.name == 'halcmd'):
-          print passed_command_dict
-
         try:
             paramcnt = 0
             params = []
@@ -1695,7 +1688,7 @@ class CommandItem( object ):
                 elif (self.name == 'shutdown_computer'):
                     reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
-                    reply = self.restart_linuxcnc_and_rockhopper() 
+                    reply = self.restart_linuxcnc_and_rockhopper()
                 elif (self.name == 'interlock_release'):
                     reply = self.interlock_release() 
                 elif (self.name == 'startup'):
