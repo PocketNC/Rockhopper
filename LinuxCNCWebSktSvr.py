@@ -173,16 +173,14 @@ class LinuxCNCStatusPoller(object):
         if self.has_interlock:
           while True:
             try:
-              self.interlock_prog_alert_pin = machinekit.hal.Pin("interlock.prog-alert")
-              self.interlock_spindle_alert_pin = machinekit.hal.Pin("interlock.spindle-alert")
+              self.interlock_pause_alert_pin = machinekit.hal.Pin("interlock.pause-alert")
               self.interlock_exception_alert_pin = machinekit.hal.Pin("interlock.exception-alert")
               break
             except:
               time.sleep(.01)
-          else:
-            self.interlock_alert_pin = None
-            self.interlock_spindle_alert_pin = None
-            self.interlock_exception_alert_pin = None
+        else:
+          self.interlock_pause_alert_pin = None
+          self.interlock_exception_alert_pin = None
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -330,27 +328,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
-        elif (self.interlock_prog_alert_pin is not None) and self.interlock_prog_alert_pin.get():
+        elif (self.interlock_pause_alert_pin is not None) and self.interlock_pause_alert_pin.get():
           lastLCNCerror = { 
-            "kind": "interlock_prog", 
+            "kind": "interlock_program", 
             "type":"error", 
-            "text": "Enclosure opened while running program, program has been paused.",
+            "text": "Enclosure opened while program running, program has been paused.",
             "time":strftime("%Y-%m-%d %H:%M:%S"), 
             "id":self.errorid
           }
           self.errorid += 1
-          self.interlock_prog_alert_pin.set(0)
-        elif (self.interlock_spindle_alert_pin is not None) and self.interlock_spindle_alert_pin.get() and not (isinstance(lastLCNCerror, dict) and lastLCNCerror['kind'] == 'interlock_prog'):
-          # The checks for type and kind of lastLCNCerror are too ensure any interlock program pause alert is delivered before we attempt to send the alert for the spindle pause
-          lastLCNCerror = { 
-            "kind": "interlock_spindle", 
-            "type":"error",
-            "text": "Enclosure opened while spindle in motion, spindle has been paused.",
-            "time":strftime("%Y-%m-%d %H:%M:%S"),
-            "id":self.errorid
-          }
-          self.errorid += 1
-          self.interlock_spindle_alert_pin.set(0)
+          self.interlock_pause_alert_pin.set(0)
         elif (self.interlock_exception_alert_pin is not None) and self.interlock_exception_alert_pin.get():
           lastLCNCerror = { 
             "kind": "interlock_exception", 
@@ -998,7 +985,7 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
 StatusItem( name='halsig_interlockClosed',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='Monitors status of interlock. Also true if not equipped with interlock.' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_interlock.spindle-paused-by-interlock',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='True if the spindle is paused, and the pause is the result of opening interlock' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_interlock.program-paused-by-interlock',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.' ).register_in_dict( StatusItems )
 
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
@@ -1488,11 +1475,10 @@ class CommandItem( object ):
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-    
-    def resume_spindle_after_interlock( self ):
+
+    def interlock_release( self ):
         try:
-            print 'trying to resume'
-            machinekit.hal.Pin("interlock.spindle-resume").set(1)
+            machinekit.hal.Pin("interlock.release").set(1)
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except Exception as e:
             print e
@@ -1570,35 +1556,7 @@ class CommandItem( object ):
                         break
 
             if (self.type == CommandItem.MOTION):
-                # If attempting to start, single-step, or resume a program, check that the interlock is closed
-                if (self.name == 'auto') and (params[0] in [0,1,2]):
-                    try:
-                      linuxcnc_status_poller.hal_mutex.acquire()
-                      if linuxcnc_status_poller.sig_dict.get('interlockClosed') == 'FALSE':
-                        lastLCNCerror = {
-                          "kind": "interlock",
-                          "type":"warning",
-                          "text": "Enclosure door must be closed to run program.",
-                          "time":strftime("%Y-%m-%d %H:%M:%S"),
-                          "id": LINUXCNCSTATUS.errorid 
-                        }
-                        LINUXCNCSTATUS.errorid += 1
-                        return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-                      elif linuxcnc_status_poller.pin_dict.get('interlock.spindle-paused-by-interlock') == 'TRUE':
-                        lastLCNCerror = {
-                          "kind": "interlock",
-                          "type":"warning",
-                          "text": "Spindle has entered a paused state after the interlock was detected as opened while the spindle was turning. Spindle must be un-paused before a program can be run. If the appropriate button is not visible, clear your browser cache and refresh UI.",
-                          "time":strftime("%Y-%m-%d %H:%M:%S"),
-                          "id": LINUXCNCSTATUS.errorid
-                        }
-                        LINUXCNCSTATUS.errorid += 1
-                        return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-                    except Exception as e:
-                      print e  
-                    finally:
-                      linuxcnc_status_poller.hal_mutex.release()
-                # execute command as a linuxcnc module call
+                #execute command as a linuxcnc module call
                 (linuxcnc_command.__getattribute__( self.name ))( *params )
 
             elif (self.type == CommandItem.HAL):
@@ -1632,9 +1590,9 @@ class CommandItem( object ):
                 elif (self.name == 'shutdown_computer'):
                     reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
-                    reply = self.restart_linuxcnc_and_rockhopper()
-                elif (self.name == 'resume_spindle'):
-                    reply = self.resume_spindle_after_interlock()    
+                    reply = self.restart_linuxcnc_and_rockhopper() 
+                elif (self.name == 'interlock_release'):
+                    reply = self.interlock_release() 
                 elif (self.name == 'startup'):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
@@ -1682,6 +1640,7 @@ class CommandItem( object ):
 CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
@@ -1717,7 +1676,6 @@ CommandItem( name='set_optional_stop',       paramTypes=[ {'pname':'onoff', 'pty
 CommandItem( name='set_spindle_override',    paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='set spindle override flag' ).register_in_dict( CommandItems )
 CommandItem( name='spindle',                 paramTypes=[ {'pname':'spindle', 'ptype':'lookup', 'lookup-vals':['SPINDLE_FORWARD','SPINDLE_REVERSE','SPINDLE_OFF','SPINDLE_INCREASE','SPINDLE_DECREASE','SPINDLE_CONSTANT'], 'optional':False} ],      help='set spindle direction.  Legal values: SPINDLE_FORWARD, SPINDLE_REVERSE, SPINDLE_OFF, SPINDLE_INCREASE, SPINDLE_DECREASE, SPINDLE_CONSTANT' ).register_in_dict( CommandItems )
 CommandItem( name='spindleoverride',         paramTypes=[ {'pname':'factor', 'ptype':'float', 'optional':False} ],      help='set spindle override factor' ).register_in_dict( CommandItems )
-CommandItem( name='resume_spindle',          paramTypes=[  ],      help='resumes spindle after it has been inhibited by opening of interlock. only necessary if the spindle was in motion when the interlock was opened', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='state',                   paramTypes=[ {'pname':'state', 'ptype':'lookup', 'lookup-vals':['STATE_ESTOP','STATE_ESTOP_RESET','STATE_ON','STATE_OFF'], 'optional':False} ],      help='set the machine state.  Legal values: STATE_ESTOP_RESET, STATE_ESTOP, STATE_ON, STATE_OFF' ).register_in_dict( CommandItems )
 CommandItem( name='teleop_enable',           paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ],      help='enable/disable teleop mode' ).register_in_dict( CommandItems )
 CommandItem( name='teleop_vector',           paramTypes=[ {'pname':'p1', 'ptype':'float', 'optional':False}, {'pname':'p2', 'ptype':'float', 'optional':False}, {'pname':'p3', 'ptype':'float', 'optional':False}, {'pname':'p4', 'ptype':'float', 'optional':True}, {'pname':'p5', 'ptype':'float', 'optional':True}, {'pname':'p6', 'ptype':'float', 'optional':True} ],      help='set teleop destination vector' ).register_in_dict( CommandItems )
