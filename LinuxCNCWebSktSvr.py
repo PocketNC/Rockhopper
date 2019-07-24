@@ -781,6 +781,14 @@ class StatusItem( object ):
 
             for ifaceName in interfaces():
                 ret["data"]["addresses"] += [ i['addr'] for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}]) if i['addr'] not in ['127.0.0.1'] ]
+
+            ret["data"]["swap"] = {
+                "exists": os.path.isfile("/my_swap")
+            }
+
+            if ret["data"]["swap"]["exists"]:
+                ret["data"]["swap"]["size"] = os.path.getsize("/my_swap")
+                ret["data"]["swap"]["on"] = "my_swap" in subprocess.check_output(['sudo', 'swapon', '-s'])
         except Exception as e:
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret["data"] = e.message
@@ -1264,6 +1272,7 @@ class CommandItem( object ):
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'refresh_ui' }
 
+
     def set_date(self, dateString):
         try:
           set_date_string(dateString)
@@ -1271,6 +1280,53 @@ class CommandItem( object ):
            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'set_date' }
+
+    #Create a swap file, allocate space, set permissions, and make entry in /etc/fstab
+    def create_swap(self, commandDict):
+        try:
+            #df reports disk space with units of KiB
+            diskSpaceMb = StatusItems['system_status'].get_system_status()['data']['disk']['available'] * 0.001024
+            swapSizeMb = int(commandDict['0'])
+            #We've decided on 256 MB free as a minimum for now. -JMD 6/6/19
+            if diskSpaceMb < ( swapSizeMb + 256 ):
+                raise ValueError('Not enough disk space to create swap file of requested %s MB size' % (swapSize))
+            subprocess.call(['sudo', 'fallocate', '-l', '%sMB' % (commandDict['0']), '/my_swap'], cwd=POCKETNC_DIRECTORY)
+            subprocess.call(['sudo', 'chmod', '600', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+            subprocess.call(['sudo', 'mkswap', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+            fstab = subprocess.check_output(['sudo', 'cat', '/etc/fstab'], cwd=POCKETNC_DIRECTORY)
+            if "/my_swap swap swap defaults 0 0" not in fstab:
+                subprocess.call(['sudo', 'sh', '-c',  'echo "/my_swap swap swap defaults 0 0" >> /etc/fstab'], cwd=POCKETNC_DIRECTORY)
+
+        except Exception as e:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'create_swap' }
+
+    def enable_swap(self, commandDict):
+        try:
+            subprocess.call(['sudo', 'swapon', '/my_swap'])
+        except Exception as e:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'enable_swap' }  
+
+    def disable_swap(self, commandDict):
+        try:
+            subprocess.call(['sudo', 'swapoff', '-v', '/my_swap'])
+        except Exception as e:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'disable_swap' }  
+
+    #Delete swap file and /etc/fstab entry if it exists
+    def delete_swap(self, commandDict):
+        try:
+            subprocess.call(['sudo', 'sed', '-i', '/my_swap swap swap defaults 0 0/d', '/etc/fstab'])
+            subprocess.call(['sudo', 'rm', '/my_swap'])
+        except Exception as e:
+            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+
+        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'delete_swap' }  
 
     def clear_logs(self, commandDict):
         try:
@@ -1709,6 +1765,14 @@ class CommandItem( object ):
                     reply = self.put_compensation(passed_command_dict)
                 elif (self.name == 'check_for_updates'):
                     reply = self.check_for_updates(passed_command_dict)
+                elif (self.name == 'create_swap'):
+                    reply = self.create_swap(passed_command_dict)
+                elif (self.name == 'delete_swap'):
+                    reply = self.delete_swap(passed_command_dict)
+                elif (self.name == 'enable_swap'):
+                    reply = self.enable_swap(passed_command_dict)
+                elif (self.name == 'disable_swap'):
+                    reply = self.disable_swap(passed_command_dict)
                 elif (self.name == 'clear_logs'):
                     reply = self.clear_logs(passed_command_dict)
                 elif (self.name == 'set_date'):
@@ -1797,6 +1861,10 @@ CommandItem( name='set_date', isasync=False, paramTypes=[], help='Set the system
 CommandItem( name='clear_logs', isasync=False, paramTypes=[], help='Truncate log files found in /var/log to 0 bytes.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_ncfiles', isasync=False, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='create_swap', isasync=False, paramTypes=[], help='Create a swap file, allocate disk space, and add necessary entry to /etc/fstab.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='delete_swap', isasync=False, paramTypes=[], help='Delete an existing swap file and /etc/fstab entry.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='enable_swap', isasync=False, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='disable_swap', isasync=False, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
