@@ -1069,6 +1069,7 @@ StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariabl
 
 StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.performing_warmup',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates the high speed spindle warm up is in process.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
 StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Pressure data history, back as far as one hour' ).register_in_dict( StatusItems )
