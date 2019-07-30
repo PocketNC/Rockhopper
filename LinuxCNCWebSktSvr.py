@@ -1281,52 +1281,68 @@ class CommandItem( object ):
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'set_date' }
 
+
     #Create a swap file, allocate space, set permissions, and make entry in /etc/fstab
     def create_swap(self, commandDict):
-        try:
-            #df reports disk space with units of KiB
-            diskSpaceMb = StatusItems['system_status'].get_system_status()['data']['disk']['available'] * 0.001024
-            swapSizeMb = int(commandDict['0'])
-            #We've decided on 256 MB free as a minimum for now. -JMD 6/6/19
-            if diskSpaceMb < ( swapSizeMb + 256 ):
-                raise ValueError('Not enough disk space to create swap file of requested %s MB size' % (swapSize))
-            subprocess.call(['sudo', 'fallocate', '-l', '%sMB' % (commandDict['0']), '/my_swap'], cwd=POCKETNC_DIRECTORY)
-            subprocess.call(['sudo', 'chmod', '600', '/my_swap'], cwd=POCKETNC_DIRECTORY)
-            subprocess.call(['sudo', 'mkswap', '/my_swap'], cwd=POCKETNC_DIRECTORY)
-            fstab = subprocess.check_output(['sudo', 'cat', '/etc/fstab'], cwd=POCKETNC_DIRECTORY)
-            if "/my_swap swap swap defaults 0 0" not in fstab:
-                subprocess.call(['sudo', 'sh', '-c',  'echo "/my_swap swap swap defaults 0 0" >> /etc/fstab'], cwd=POCKETNC_DIRECTORY)
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'create_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        #df reports disk space with units of KiB
+        diskSpaceMb = StatusItems['system_status'].get_system_status()['data']['disk']['available'] * 0.001024
+        swapSizeMb = int(commandDict['0'])
+        #We've decided on 256 MB free as a minimum for now. -JMD 6/6/19
+        if diskSpaceMb < ( swapSizeMb + 256 ):
+          reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+          reply['data']['notify'] = {'text' : 'Not enough free disk space to create swap file of requested %s MB size.' % (swapSizeMb) }
+          return reply
+        subprocess.call(['sudo', 'fallocate', '-l', '%sMB' % (commandDict['0']), '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        subprocess.call(['sudo', 'chmod', '600', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        subprocess.call(['sudo', 'mkswap', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        fstab = subprocess.check_output(['sudo', 'cat', '/etc/fstab'], cwd=POCKETNC_DIRECTORY)
+        if "/my_swap swap swap defaults 0 0" not in fstab:
+          subprocess.call(['sudo', 'sh', '-c',  'echo "/my_swap swap swap defaults 0 0" >> /etc/fstab'], cwd=POCKETNC_DIRECTORY)
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
-        except Exception as e:
-            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+      return reply
 
-        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'create_swap' }
 
     def enable_swap(self, commandDict):
-        try:
-            subprocess.call(['sudo', 'swapon', '/my_swap'])
-        except Exception as e:
-            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'enable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        subprocess.call(['sudo', 'swapon', '/my_swap'])
+      except Exception as e:
+        print 'enable exception'
+        print e
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
-        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'enable_swap' }  
+      return reply
+
 
     def disable_swap(self, commandDict):
-        try:
-            subprocess.call(['sudo', 'swapoff', '-v', '/my_swap'])
-        except Exception as e:
-            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'disable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        p = subprocess.Popen(['sudo', 'swapoff', '-v', '/my_swap'], stderr=subprocess.PIPE, stdout=subprocess.PIPE )
+        result, err = p.communicate()
+        if 'swapoff failed: Cannot allocate memory' in err:
+          reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+          reply['data']['notify'] = {'text' : 'The swap file cannot be disabled right now. Insufficient space available in primary RAM to hold contents of swap file.' }
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
-        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'disable_swap' }  
+      return reply
 
-    #Delete swap file and /etc/fstab entry if it exists
+
+    #Delete swap file and its entry in /etc/fstab
     def delete_swap(self, commandDict):
-        try:
-            subprocess.call(['sudo', 'sed', '-i', '/my_swap swap swap defaults 0 0/d', '/etc/fstab'])
-            subprocess.call(['sudo', 'rm', '/my_swap'])
-        except Exception as e:
-            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'delete_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        subprocess.call(['sudo', 'sed', '-i', '/my_swap swap swap defaults 0 0/d', '/etc/fstab'])
+        subprocess.call(['sudo', 'rm', '/my_swap'])
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
-        return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'delete_swap' }  
+      return reply
+
 
     def clear_logs(self, commandDict):
         try:
