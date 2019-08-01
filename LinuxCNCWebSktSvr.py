@@ -161,7 +161,7 @@ class LinuxCNCStatusPoller(object):
               self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
               self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
-              break;
+              break
             except:
               time.sleep(.1)
         else:
@@ -169,8 +169,7 @@ class LinuxCNCStatusPoller(object):
           self.hss_full_warmup_pin = None
           self.hss_p_abort_pin = None
           self.hss_t_abort_pin = None
- 
- 
+
         rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
         has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
         if has_rtc:
@@ -189,7 +188,20 @@ class LinuxCNCStatusPoller(object):
         for n in range(5):
           print n
           self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
-        
+
+        interlock_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'INTERLOCK')
+        self.has_interlock = len(interlock_ini_data['parameters']) > 0 and interlock_ini_data['parameters'][0]['values']['value'] == '1'
+        if self.has_interlock:
+          while True:
+            try:
+              self.interlock_pause_alert_pin = machinekit.hal.Pin("interlock.pause-alert")
+              self.interlock_exception_alert_pin = machinekit.hal.Pin("interlock.exception-alert")
+              break
+            except:
+              time.sleep(.01)
+        else:
+          self.interlock_pause_alert_pin = None
+          self.interlock_exception_alert_pin = None
 
         # HAL dictionaries of signals and pins
         self.pin_dict = {}
@@ -293,8 +305,9 @@ class LinuxCNCStatusPoller(object):
         self.hal_thread.start()
 
     def poll_update_errors(self):
-        global lastLCNCerror
+      global lastLCNCerror
 
+      try:
         if (self.linuxcnc_is_alive is False):
             return
         if (self.hss_aborted_pin is not None) and self.hss_aborted_pin.get():
@@ -336,6 +349,26 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
+        elif (self.interlock_pause_alert_pin is not None) and self.interlock_pause_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_program", 
+            "type":"error", 
+            "text": "Enclosure opened while program running, program has been paused.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_pause_alert_pin.set(0)
+        elif (self.interlock_exception_alert_pin is not None) and self.interlock_exception_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_exception", 
+            "type":"error",
+            "text": "An exception has occured in the interlock HAL component, machine has been E-stopped as a precaution.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"),
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_exception_alert_pin.set(0)  
         else:
           if ( (self.linuxcnc_errors is None) ):
               self.linuxcnc_errors = linuxcnc.error_channel()
@@ -353,6 +386,8 @@ class LinuxCNCStatusPoller(object):
                   self.errorid = self.errorid + 1 
           except:
               pass
+      except Exception as e:
+        print e
 
     def poll_update(self):
         global linuxcnc_command
@@ -771,6 +806,14 @@ class StatusItem( object ):
 
             for ifaceName in interfaces():
                 ret["data"]["addresses"] += [ i['addr'] for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}]) if i['addr'] not in ['127.0.0.1'] ]
+
+            ret["data"]["swap"] = {
+                "exists": os.path.isfile("/my_swap")
+            }
+
+            if ret["data"]["swap"]["exists"]:
+                ret["data"]["swap"]["size"] = os.path.getsize("/my_swap")
+                ret["data"]["swap"]["on"] = "my_swap" in subprocess.check_output(['sudo', 'swapon', '-s'])
         except Exception as e:
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret["data"] = e.message
@@ -900,7 +943,7 @@ class StatusItem( object ):
                     if linuxcnc_status_poller.rtc_seconds_pin:
                         ret['data'] = linuxcnc_status_poller.rtc_seconds_pin.get()
                 elif (self.name == 'rotary_motion_only'):
-                  ret['data'] = self.check_if_rotary_motion_only() 
+                    ret['data'] = self.check_if_rotary_motion_only() 
                 elif (self.name == 'pressure_data'):
                     ret['data'] = pressureData[:]
                 elif (self.name == 'temperature_data'):
@@ -911,6 +954,7 @@ class StatusItem( object ):
                     ret['data'] = (linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name ))[item_index]
                 else:
                     ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
+
         except Exception as ex :
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
             ret['data'] = ''
@@ -1053,6 +1097,8 @@ StatusItem( name='compensation',             coreLinuxCNCVariable=False, watchab
 
 StatusItem( name='error',                    coreLinuxCNCVariable=False, watchable=True,  valtype='dict',    help='Error queue.' ).register_in_dict( StatusItems )
 StatusItem( name='running',                  coreLinuxCNCVariable=False, watchable=True,  valtype='int',     help='True if linuxcnc is up and running.', requiresLinuxCNCUp=False ).register_in_dict( StatusItems )
+StatusItem( name='halsig_interlockClosed',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='Monitors status of interlock. Also true if not equipped with interlock.' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_interlock.program-paused-by-interlock',   coreLinuxCNCVariable=False, watchable=True,  valtype='string',     help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.' ).register_in_dict( StatusItems )
 
 StatusItem( name='rtc_seconds',              coreLinuxCNCVariable=False, watchable=True, valtype='float', help='Run time of current cycle in seconds' ).register_in_dict( StatusItems )
 StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchable=True, valtype='bool',  help='True if any rotational axis is in motion but not any linear axis.').register_in_dict( StatusItems ) 
@@ -1254,6 +1300,7 @@ class CommandItem( object ):
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'refresh_ui' }
 
+
     def set_date(self, dateString):
         try:
           set_date_string(dateString)
@@ -1261,6 +1308,69 @@ class CommandItem( object ):
            return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
 
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'set_date' }
+
+
+    #Create a swap file, allocate space, set permissions, and make entry in /etc/fstab
+    def create_swap(self, commandDict):
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'create_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        #df reports disk space with units of KiB
+        diskSpaceMb = StatusItems['system_status'].get_system_status()['data']['disk']['available'] * 0.001024
+        swapSizeMb = int(commandDict['0'])
+        #We've decided on 256 MB free as a minimum for now. -JMD 6/6/19
+        if diskSpaceMb < ( swapSizeMb + 256 ):
+          reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+          reply['data']['notify'] = {'text' : 'Not enough free disk space to create swap file of requested %s MB size.' % (swapSizeMb) }
+          return reply
+        subprocess.call(['sudo', 'fallocate', '-l', '%sMB' % (commandDict['0']), '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        subprocess.call(['sudo', 'chmod', '600', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        subprocess.call(['sudo', 'mkswap', '/my_swap'], cwd=POCKETNC_DIRECTORY)
+        fstab = subprocess.check_output(['sudo', 'cat', '/etc/fstab'], cwd=POCKETNC_DIRECTORY)
+        if "/my_swap swap swap defaults 0 0" not in fstab:
+          subprocess.call(['sudo', 'sh', '-c',  'echo "/my_swap swap swap defaults 0 0" >> /etc/fstab'], cwd=POCKETNC_DIRECTORY)
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+
+      return reply
+
+
+    def enable_swap(self, commandDict):
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'enable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        subprocess.call(['sudo', 'swapon', '/my_swap'])
+      except Exception as e:
+        print 'enable exception'
+        print e
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+
+      return reply
+
+
+    def disable_swap(self, commandDict):
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'disable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        p = subprocess.Popen(['sudo', 'swapoff', '-v', '/my_swap'], stderr=subprocess.PIPE, stdout=subprocess.PIPE )
+        result, err = p.communicate()
+        if 'swapoff failed: Cannot allocate memory' in err:
+          reply['code'] = LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER
+          reply['data']['notify'] = {'text' : 'The swap file cannot be disabled right now. Insufficient space available in primary RAM to hold contents of swap file.' }
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+
+      return reply
+
+
+    #Delete swap file and its entry in /etc/fstab
+    def delete_swap(self, commandDict):
+      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'delete_swap', 'data' : { 'isSwapCmd' : 'true' } }
+      try:
+        subprocess.call(['sudo', 'sed', '-i', '/my_swap swap swap defaults 0 0/d', '/etc/fstab'])
+        subprocess.call(['sudo', 'rm', '/my_swap'])
+      except Exception as e:
+        reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+
+      return reply
+
 
     def clear_logs(self, commandDict):
         try:
@@ -1580,6 +1690,14 @@ class CommandItem( object ):
         except:
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
+    def interlock_release( self ):
+        try:
+            machinekit.hal.Pin("interlock.release").set(1)
+            return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
+        except Exception as e:
+            print e
+            return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+
     def shutdown_linuxcnc( self ):
         try:
             displayname = StatusItem.get_ini_data( only_section='DISPLAY', only_name='DISPLAY' )['data']['parameters'][0]['values']['value']
@@ -1692,6 +1810,8 @@ class CommandItem( object ):
                     reply = self.shutdown_computer()
                 elif (self.name == 'restart'):
                     reply = self.restart_linuxcnc_and_rockhopper()
+                elif (self.name == 'interlock_release'):
+                    reply = self.interlock_release() 
                 elif (self.name == 'startup'):
                     reply = self.start_linuxcnc()
                 elif (self.name == 'program_upload'):
@@ -1710,6 +1830,14 @@ class CommandItem( object ):
                     reply = self.put_compensation(passed_command_dict)
                 elif (self.name == 'check_for_updates'):
                     reply = self.check_for_updates(passed_command_dict)
+                elif (self.name == 'create_swap'):
+                    reply = self.create_swap(passed_command_dict)
+                elif (self.name == 'delete_swap'):
+                    reply = self.delete_swap(passed_command_dict)
+                elif (self.name == 'enable_swap'):
+                    reply = self.enable_swap(passed_command_dict)
+                elif (self.name == 'disable_swap'):
+                    reply = self.disable_swap(passed_command_dict)
                 elif (self.name == 'clear_logs'):
                     reply = self.clear_logs(passed_command_dict)
                 elif (self.name == 'set_date'):
@@ -1745,6 +1873,8 @@ CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
 CommandItem( name='auto',                    paramTypes=[ {'pname':'auto', 'ptype':'lookup', 'lookup-vals':['AUTO_RUN','AUTO_STEP','AUTO_RESUME','AUTO_PAUSE'], 'optional':False }, {'pname':'run_from', 'ptype':'int', 'optional':True} ],      help='run, step, pause or resume a program.  auto legal values: AUTO_RUN, AUTO_STEP, AUTO_RESUME, AUTO_PAUSE' ).register_in_dict( CommandItems )
@@ -1799,6 +1929,10 @@ CommandItem( name='set_date', isasync=False, paramTypes=[], help='Set the system
 CommandItem( name='clear_logs', isasync=False, paramTypes=[], help='Truncate log files found in /var/log to 0 bytes.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_ncfiles', isasync=False, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='create_swap', isasync=False, paramTypes=[], help='Create a swap file, allocate disk space, and add necessary entry to /etc/fstab.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='delete_swap', isasync=False, paramTypes=[], help='Delete an existing swap file and /etc/fstab entry.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='enable_swap', isasync=False, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='disable_swap', isasync=False, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
