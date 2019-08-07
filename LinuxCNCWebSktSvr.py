@@ -195,12 +195,14 @@ class LinuxCNCStatusPoller(object):
           while True:
             try:
               self.interlock_pause_alert_pin = machinekit.hal.Pin("interlock.pause-alert")
+              self.interlock_spindle_stop_alert_pin = machinekit.hal.Pin("interlock.spindle-stop-alert")
               self.interlock_exception_alert_pin = machinekit.hal.Pin("interlock.exception-alert")
               break
             except:
               time.sleep(.01)
         else:
           self.interlock_pause_alert_pin = None
+          self.interlock_spindle_stop_alert_pin = None
           self.interlock_exception_alert_pin = None
 
         # HAL dictionaries of signals and pins
@@ -359,6 +361,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.interlock_pause_alert_pin.set(0)
+        elif (self.interlock_spindle_stop_alert_pin is not None) and self.interlock_spindle_stop_alert_pin.get():
+          lastLCNCerror = { 
+            "kind": "interlock_program", 
+            "type":"error", 
+            "text": "Enclosure opened while spindle enabled, spindle has been stopped.",
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid
+          }
+          self.errorid += 1
+          self.interlock_spindle_stop_alert_pin.set(0)
         elif (self.interlock_exception_alert_pin is not None) and self.interlock_exception_alert_pin.get():
           lastLCNCerror = { 
             "kind": "interlock_exception", 
