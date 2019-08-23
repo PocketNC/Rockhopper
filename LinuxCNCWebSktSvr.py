@@ -160,7 +160,9 @@ class LinuxCNCStatusPoller(object):
               self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
               self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
               self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
+              self.hss_p_detect_abort_pin = machinekit.hal.Pin("hss_sensors.p_detect_abort")
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
+              self.hss_t_detect_abort_pin = machinekit.hal.Pin("hss_sensors.t_detect_abort")
               break
             except:
               time.sleep(.1)
@@ -168,7 +170,9 @@ class LinuxCNCStatusPoller(object):
           self.hss_aborted_pin = None
           self.hss_full_warmup_pin = None
           self.hss_p_abort_pin = None
+          self.hss_p_detect_abort_pin = None
           self.hss_t_abort_pin = None
+          self.hss_t_detect_abort_pin = None
 
         rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
         has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
@@ -341,6 +345,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_p_abort_pin.set(0);
+        elif (self.hss_p_detect_abort_pin is not None) and self.hss_p_detect_abort_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_pressure_detect", 
+            "type":"error", 
+            "text": "Failed to detect air supply pressure sensor. Spindle cannot be turned on.", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_p_detect_abort_pin.set(0);
         elif (self.hss_t_abort_pin is not None) and self.hss_t_abort_pin.get():
           lastLCNCerror = { 
             "kind": "spindle_temperature", 
@@ -351,6 +365,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
+        elif (self.hss_t_detect_abort_pin is not None) and self.hss_t_detect_abort_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_pressure_detect", 
+            "type":"error", 
+            "text": "Failed to detect main board temperature sensor. Spindle cannot be turned on.", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_t_detect_abort_pin.set(0);
         elif (self.interlock_pause_alert_pin is not None) and self.interlock_pause_alert_pin.get():
           lastLCNCerror = { 
             "kind": "interlock_program", 
@@ -1090,7 +1114,7 @@ StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariabl
 
 StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.detected',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates if environmental sensors for high speed spindle are detected' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.performing_warmup',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates the high speed spindle warm up is in process.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
 StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Pressure data history, back as far as one hour' ).register_in_dict( StatusItems )
