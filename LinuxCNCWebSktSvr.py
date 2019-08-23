@@ -754,30 +754,36 @@ class StatusItem( object ):
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
 
-    #adapted from http://code.activestate.com/recipes/577879-create-a-nested-dictionary-from-oswalk/
     def map_usb_files( self ):
       try:
-        usbDir = "/media/usb"
         usbMap = {}
-        if( not os.path.exists(usbDir) or len(os.listdir(usbDir)) == 0):
-          usbMap["detected"] = False
-        else:
-          usbMap["detected"] = True
-          start = usbDir.rfind(os.sep) + 1
-          for path, dirs, files in os.walk(usbDir):
-            #leave out hidden dirs
-            dirs[:] = [d for d in dirs if not d[0] == '.']
-            #and leave out hidden and non-ngc files
-            files = [f for f in files if ( not f[0] == '.' and f[-4:].lower() == '.ngc')]
-            folders = path[start:].split(os.sep)
-            subdir = dict.fromkeys(files)
-            parent = reduce(dict.get, folders[:-1], usbMap)
-            parent[folders[-1]] = subdir
+        # lsblk lists the system's block devices with details including mount point
+        lsblk = subprocess.check_output(['lsblk'])
+        # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
+        mountPathIdx = lsblk.find('/media/usb')
+        if( mountPathIdx != -1 ):
+          usbPath = lsblk[mountPathIdx:lsblk.find('\n', mountPathIdx)]
+          usbMap['mountPath'] = usbPath
+          startIdx = usbPath.rfind(os.sep) + 1
+          for path, dirs, files in os.walk(usbPath):
+            currentDirs = path[startIdx:].split(os.sep)
+            # Don't add anything within a hidden dir to map
+            if any( d[0] == '.' for d in currentDirs ):
+              continue
+            
+            # Navigate through the nested dicts until a new dict is created for the current location
+            currentLocation = usbMap
+            for d in currentDirs:
+              currentLocation = currentLocation.setdefault(d, {} )
+
+            for f in files:
+              if ( f[0] != '.' ) and ( f[-4:].lower() == '.ngc' ):
+                currentLocation[f] = None
       except Exception as e:
+        print e
         code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         ret["data"] = e.message
       return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":usbMap }
-
 
     def get_users( self ):
         global userdict
@@ -792,7 +798,7 @@ class StatusItem( object ):
             #df gives 6 columns of data. The 6th column, Mounted on, provides a search term for the root directory ("/") which is consistent across tested versions of df
             #The 3 desired disk space values are located 4, 3, and 2 positions behind the location of this search term
             totalIndex = df_data.index("/") - 4
-            (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ]
+            (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ] 
 
             logs_used = int(subprocess.check_output(['sudo', 'du', '-k', '-d', '0', '/var/log']).split()[0])
 
@@ -1671,28 +1677,50 @@ class CommandItem( object ):
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         
         return reply 
-    
+
     # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it
     def eject_usb( self ):
+      print 'ejecting'
       global lastLCNCerror
       reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
       try:
-        #attempt to kill any processes using the drive
-        procs = subprocess.call(['sudo', 'fuser', '-vmk', '/media/usb'], stderr=subprocess.STDOUT )
-        returncode = subprocess.call(['sudo', 'umount', '/media/usb'])
-        if returncode != 0:
-          lastLCNCerror = { 
-            "kind": "eject_usb", 
+        try:
+          subprocess.check_output(['sudo', 'fuser', '-vmk', '/media/usb'], stderr=subprocess.STDOUT )
+        except subprocess.CalledProcessError as fuserExc:
+          print fuserExc
+          lastLCNCerror = {
+            "kind": "eject_usb",
             "type":"error",
-            "text": "Unable to eject USB device, %s" % (procs), 
-            "time":strftime("%Y-%m-%d %H:%M:%S"), 
-            "id": LINUXCNCSTATUS.errorid + 1  
+            "text": "Failed to kill processes using USB drive. Output of process-kill command:\n %s" % (fuserExc.output),
+            "time": strftime("%Y-%m-%d %H:%M:%S"),
+            "id": LINUXCNCSTATUS.errorid + 1
           }
           LINUXCNCSTATUS.errorid += 1
+        try:
+          subprocess.check_output(['sudo', 'umount', '/media/usb'], stderr=subprocess.STDOUT )
+          lastLCNCerror = {
+            "kind": "eject_usb",
+            "type":"success",
+            "text": "USB drive safe to remove.",
+            "time": strftime("%Y-%m-%d %H:%M:%S"),
+            "id": LINUXCNCSTATUS.errorid + 1
+          }
+          LINUXCNCSTATUS.errorid += 1
+        except subprocess.CalledProcessError as umountExc:
+          print umountExc
+          lastLCNCerror = {
+            "kind": "eject_usb",
+            "type":"error",
+            "text": "Failed to unmount USB drive. Output of unmount command:\n %s" % (umountExc.output),
+            "time": strftime("%Y-%m-%d %H:%M:%S"),
+            "id": LINUXCNCSTATUS.errorid + 1
+          }
+          LINUXCNCSTATUS.errorid += 1
+          reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
       except Exception as ex:
-        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-      
-      return reply 
+        print ex
+        
+      return reply
 
     def restart_linuxcnc_and_rockhopper( self ):
         global POCKETNC_DIRECTORY
