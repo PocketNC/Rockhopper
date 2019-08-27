@@ -780,31 +780,32 @@ class StatusItem( object ):
 
     def map_usb_files( self ):
       try:
-        usbMap = {}
-        # lsblk lists the system's block devices with details including mount point
-        lsblk = subprocess.check_output(['lsblk'])
+        usbMap = { "detected" : False }
         # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
-        mountPathIdx = lsblk.find('/media/usb')
-        if( mountPathIdx != -1 ):
-          usbPath = lsblk[mountPathIdx:lsblk.find('\n', mountPathIdx)]
-          usbMap['mountPath'] = usbPath
-          startIdx = usbPath.rfind(os.sep) + 1
-          for path, dirs, files in os.walk(usbPath):
+        usbDirBase = "/media/usb"
+        usbDir = ""
+        for mountDirIdx in range(8):
+          usbDir = usbDirBase + str( mountDirIdx )
+          if ( os.path.exists(usbDir) and len(os.listdir(usbDir)) > 0 ):
+            usbMap["detected"] = True
+            usbMap["mountPath"] = usbDir
+            break
+        if usbMap["detected"]:
+          startIdx = usbDir.rfind(os.sep) + 1
+          #adapted from http://code.activestate.com/recipes/577879-create-a-nested-dictionary-from-oswalk/
+          for path, dirs, files in os.walk(usbDir):
             currentDirs = path[startIdx:].split(os.sep)
             # Don't add anything within a hidden dir to map
             if any( d[0] == '.' for d in currentDirs ):
               continue
-            
             # Navigate through the nested dicts until a new dict is created for the current location
             currentLocation = usbMap
             for d in currentDirs:
               currentLocation = currentLocation.setdefault(d, {} )
-
             for f in files:
               if ( f[0] != '.' ) and ( f[-4:].lower() == '.ngc' ):
                 currentLocation[f] = None
       except Exception as e:
-        print e
         code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         ret["data"] = e.message
       return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":usbMap }
@@ -1702,14 +1703,15 @@ class CommandItem( object ):
         
         return reply 
 
-    # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it
-    def eject_usb( self ):
-      print 'ejecting'
+    # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it.
+    # The mountSlot is an integer corresponding to one of the 8 usbmount directories ('/media/usb[0,8)')
+    def eject_usb( self, mountSlot ):
       global lastLCNCerror
       reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
       try:
         try:
-          subprocess.check_output(['sudo', 'fuser', '-vmk', '/media/usb'], stderr=subprocess.STDOUT )
+          usbMountPath = '/media/usb' + str(mountSlot)
+          subprocess.check_output(['sudo', 'fuser', '-vmk', usbMountPath], stderr=subprocess.STDOUT )
         except subprocess.CalledProcessError as fuserExc:
           print fuserExc
           lastLCNCerror = {
@@ -1721,7 +1723,7 @@ class CommandItem( object ):
           }
           LINUXCNCSTATUS.errorid += 1
         try:
-          subprocess.check_output(['sudo', 'umount', '/media/usb'], stderr=subprocess.STDOUT )
+          subprocess.check_output(['sudo', 'umount', usbMountPath], stderr=subprocess.STDOUT )
           lastLCNCerror = {
             "kind": "eject_usb",
             "type":"success",
@@ -1917,7 +1919,8 @@ class CommandItem( object ):
                 elif (self.name == 'reset_clock'):
                     reply = self.reset_run_time_clock()
                 elif (self.name == 'eject_usb'):
-                    reply = self.eject_usb()
+                    print passed_command_dict
+                    reply = self.eject_usb(passed_command_dict['0'])
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
