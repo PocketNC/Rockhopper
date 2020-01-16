@@ -1919,7 +1919,6 @@ class CommandItem( object ):
                 elif (self.name == 'reset_clock'):
                     reply = self.reset_run_time_clock()
                 elif (self.name == 'eject_usb'):
-                    print passed_command_dict
                     reply = self.eject_usb(passed_command_dict['0'])
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
