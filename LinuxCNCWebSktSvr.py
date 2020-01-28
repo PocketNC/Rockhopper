@@ -796,7 +796,7 @@ class StatusItem( object ):
           for path, dirs, files in os.walk(usbDir):
             currentDirs = path[startIdx:].split(os.sep)
             # Don't add anything within a hidden dir to map
-            if any( d[0] == '.' for d in currentDirs ):
+            if any( d[0] == '.' or d == 'System Volume Information' for d in currentDirs ):
               continue
             # Navigate through the nested dicts until a new dict is created for the current location
             currentLocation = usbMap
@@ -1705,47 +1705,63 @@ class CommandItem( object ):
 
     # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it.
     # The mountSlot is an integer corresponding to one of the 8 usbmount directories ('/media/usb[0,8)')
-    def eject_usb( self, mountSlot ):
+    def eject_usb( self ):
       global lastLCNCerror
       reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
       try:
-        try:
-          usbMountPath = '/media/usb' + str(mountSlot)
-          subprocess.check_output(['sudo', 'fuser', '-vmk', usbMountPath], stderr=subprocess.STDOUT )
-        except subprocess.CalledProcessError as fuserExc:
-          print fuserExc
-          lastLCNCerror = {
-            "kind": "eject_usb",
-            "type":"error",
-            "text": "Failed to kill processes using USB drive. Output of process-kill command:\n %s" % (fuserExc.output),
-            "time": strftime("%Y-%m-%d %H:%M:%S"),
-            "id": LINUXCNCSTATUS.errorid + 1
-          }
-          LINUXCNCSTATUS.errorid += 1
-        try:
-          subprocess.check_output(['sudo', 'umount', usbMountPath], stderr=subprocess.STDOUT )
-          lastLCNCerror = {
-            "kind": "eject_usb",
-            "type":"success",
-            "text": "USB drive safe to remove.",
-            "time": strftime("%Y-%m-%d %H:%M:%S"),
-            "id": LINUXCNCSTATUS.errorid + 1
-          }
-          LINUXCNCSTATUS.errorid += 1
-        except subprocess.CalledProcessError as umountExc:
-          print umountExc
-          lastLCNCerror = {
-            "kind": "eject_usb",
-            "type":"error",
-            "text": "Failed to unmount USB drive. Output of unmount command:\n %s" % (umountExc.output),
-            "time": strftime("%Y-%m-%d %H:%M:%S"),
-            "id": LINUXCNCSTATUS.errorid + 1
-          }
-          LINUXCNCSTATUS.errorid += 1
-          reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        usbDirBase = "/media/usb"
+        usbMountPath = ""
+        # On our older image (3.8-1 kernel), if using a drive with a NTFS format, physically removing the drive without first 
+        # unmounting will result in usbmount failing to remove the entry from the file system, and then re-inserting the drive
+        # will result in usbmount incrementing the slot. So we'll check for files in all 8 slots.
+        for mountDirIdx in range(8):
+          usbMountPath = usbDirBase + str( mountDirIdx )
+          if ( os.path.exists(usbMountPath) and len(os.listdir(usbMountPath)) > 0 ):
+            try:
+              subprocess.check_output(['sudo', 'fuser', '-vmk', usbMountPath], stderr=subprocess.STDOUT )
+            except subprocess.CalledProcessError as fuserExc:
+              print fuserExc
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"error",
+                  "text": "Failed to kill processes using USB drive. Output of process-kill command:\n %s" % (fuserExc.output),
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+            try:
+              subprocess.check_output(['sudo', 'umount', usbMountPath], stderr=subprocess.STDOUT )
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"success",
+                  "text": "USB drive safe to remove.",
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+            except subprocess.CalledProcessError as umountExc:
+              print umountExc
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"error",
+                  "text": "Failed to unmount USB drive. Output of unmount command:\n %s" % (umountExc.output),
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+              reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
       except Exception as ex:
         print ex
-        
+        lastLCNCerror = {
+          "kind": "eject_usb",
+          "type":"error",
+          "text": "Failed to unmount USB drive. Exception message:\n %s" % (ex.output),
+          "time": strftime("%Y-%m-%d %H:%M:%S"),
+          "id": LINUXCNCSTATUS.errorid + 1
+        }
+        LINUXCNCSTATUS.errorid += 1
+        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+          
       return reply
 
     def restart_linuxcnc_and_rockhopper( self ):
@@ -1919,7 +1935,7 @@ class CommandItem( object ):
                 elif (self.name == 'reset_clock'):
                     reply = self.reset_run_time_clock()
                 elif (self.name == 'eject_usb'):
-                    reply = self.eject_usb(passed_command_dict['0'])
+                    reply = self.eject_usb()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
