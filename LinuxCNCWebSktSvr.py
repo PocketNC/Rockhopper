@@ -160,7 +160,9 @@ class LinuxCNCStatusPoller(object):
               self.hss_aborted_pin = machinekit.hal.Pin("hss_warmup.aborted")
               self.hss_full_warmup_pin = machinekit.hal.Pin("hss_warmup.full_warmup_needed")
               self.hss_p_abort_pin = machinekit.hal.Pin("hss_sensors.p_abort")
+              self.hss_p_detect_abort_pin = machinekit.hal.Pin("hss_sensors.p_detect_abort")
               self.hss_t_abort_pin = machinekit.hal.Pin("hss_sensors.t_abort")
+              self.hss_t_detect_abort_pin = machinekit.hal.Pin("hss_sensors.t_detect_abort")
               break
             except:
               time.sleep(.1)
@@ -168,7 +170,9 @@ class LinuxCNCStatusPoller(object):
           self.hss_aborted_pin = None
           self.hss_full_warmup_pin = None
           self.hss_p_abort_pin = None
+          self.hss_p_detect_abort_pin = None
           self.hss_t_abort_pin = None
+          self.hss_t_detect_abort_pin = None
 
         rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
         has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
@@ -341,6 +345,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_p_abort_pin.set(0);
+        elif (self.hss_p_detect_abort_pin is not None) and self.hss_p_detect_abort_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_pressure_detect", 
+            "type":"error", 
+            "text": "Failed to detect air supply pressure sensor. Spindle cannot be turned on.", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_p_detect_abort_pin.set(0);
         elif (self.hss_t_abort_pin is not None) and self.hss_t_abort_pin.get():
           lastLCNCerror = { 
             "kind": "spindle_temperature", 
@@ -351,6 +365,16 @@ class LinuxCNCStatusPoller(object):
           }
           self.errorid += 1
           self.hss_t_abort_pin.set(0);
+        elif (self.hss_t_detect_abort_pin is not None) and self.hss_t_detect_abort_pin.get():
+          lastLCNCerror = { 
+            "kind": "spindle_pressure_detect", 
+            "type":"error", 
+            "text": "Failed to detect main board temperature sensor. Spindle cannot be turned on.", 
+            "time":strftime("%Y-%m-%d %H:%M:%S"), 
+            "id":self.errorid 
+          }
+          self.errorid += 1
+          self.hss_t_detect_abort_pin.set(0);
         elif (self.interlock_pause_alert_pin is not None) and self.interlock_pause_alert_pin.get():
           lastLCNCerror = { 
             "kind": "interlock_program", 
@@ -754,6 +778,38 @@ class StatusItem( object ):
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
 
+    def map_usb_files( self ):
+      try:
+        usbMap = { "detected" : False }
+        # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
+        usbDirBase = "/media/usb"
+        usbDir = ""
+        for mountDirIdx in range(8):
+          usbDir = usbDirBase + str( mountDirIdx )
+          if ( os.path.exists(usbDir) and len(os.listdir(usbDir)) > 0 ):
+            usbMap["detected"] = True
+            usbMap["mountPath"] = usbDir
+            break
+        if usbMap["detected"]:
+          startIdx = usbDir.rfind(os.sep) + 1
+          #adapted from http://code.activestate.com/recipes/577879-create-a-nested-dictionary-from-oswalk/
+          for path, dirs, files in os.walk(usbDir):
+            currentDirs = path[startIdx:].split(os.sep)
+            # Don't add anything within a hidden dir to map
+            if any( d[0] == '.' or d == 'System Volume Information' for d in currentDirs ):
+              continue
+            # Navigate through the nested dicts until a new dict is created for the current location
+            currentLocation = usbMap
+            for d in currentDirs:
+              currentLocation = currentLocation.setdefault(d, {} )
+            for f in files:
+              if ( f[0] != '.' ) and ( f[-4:].lower() == '.ngc' ):
+                currentLocation[f] = None
+      except Exception as e:
+        code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        ret["data"] = e.message
+      return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":usbMap }
+
     def get_users( self ):
         global userdict
         return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":userdict.keys() }
@@ -767,7 +823,7 @@ class StatusItem( object ):
             #df gives 6 columns of data. The 6th column, Mounted on, provides a search term for the root directory ("/") which is consistent across tested versions of df
             #The 3 desired disk space values are located 4, 3, and 2 positions behind the location of this search term
             totalIndex = df_data.index("/") - 4
-            (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ]
+            (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ] 
 
             logs_used = int(subprocess.check_output(['sudo', 'du', '-k', '-d', '0', '/var/log']).split()[0])
 
@@ -898,6 +954,8 @@ class StatusItem( object ):
                     ret = self.get_current_version()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
+                elif (self.name == 'usb'):
+                    ret = self.map_usb_files()
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
@@ -1057,13 +1115,14 @@ StatusItem( name='halpin_spindle_voltage.speed_measured',    coreLinuxCNCVariabl
 
 StatusItem( name='halpin_hss_warmup.full_warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_warmup.warmup_needed',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates high speed spindle needs to be warmed up.' ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.detected',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates if environmental sensors for high speed spindle are detected' ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.performing_warmup',    coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Flag that indicates the high speed spindle warm up is in process.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Pressure in MPa as read by MPRLS.' ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',    coreLinuxCNCVariable=False, watchable=True, valtype='float',help='Temperature in C as read by MCP9808' ).register_in_dict( StatusItems )
 StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Pressure data history, back as far as one hour' ).register_in_dict( StatusItems )
 StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Temperature data history, back as far as one hour. Key is timestamp.' ).register_in_dict( StatusItems )
 
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
+StatusItem( name='usb',                      coreLinuxCNCVariable=False, watchable=True, valtype='dict',help='Create a nested dictionary that represents the folder structure of an usb device that has been mounted at /media/usb' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
@@ -1643,7 +1702,67 @@ class CommandItem( object ):
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         
         return reply 
-    
+
+    # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it.
+    # The mountSlot is an integer corresponding to one of the 8 usbmount directories ('/media/usb[0,8)')
+    def eject_usb( self ):
+      global lastLCNCerror
+      reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
+      try:
+        usbDirBase = "/media/usb"
+        usbMountPath = ""
+        # On our older image (3.8-1 kernel), if using a drive with a NTFS format, physically removing the drive without first 
+        # unmounting will result in usbmount failing to remove the entry from the file system, and then re-inserting the drive
+        # will result in usbmount incrementing the slot. So we'll check for files in all 8 slots.
+        for mountDirIdx in range(8):
+          usbMountPath = usbDirBase + str( mountDirIdx )
+          if ( os.path.exists(usbMountPath) and len(os.listdir(usbMountPath)) > 0 ):
+            try:
+              subprocess.check_output(['sudo', 'fuser', '-vmk', usbMountPath], stderr=subprocess.STDOUT )
+            except subprocess.CalledProcessError as fuserExc:
+              print fuserExc
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"error",
+                  "text": "Failed to kill processes using USB drive. Output of process-kill command:\n %s" % (fuserExc.output),
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+            try:
+              subprocess.check_output(['sudo', 'umount', usbMountPath], stderr=subprocess.STDOUT )
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"success",
+                  "text": "USB drive safe to remove.",
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+            except subprocess.CalledProcessError as umountExc:
+              print umountExc
+              lastLCNCerror = {
+                  "kind": "eject_usb",
+                  "type":"error",
+                  "text": "Failed to unmount USB drive. Output of unmount command:\n %s" % (umountExc.output),
+                  "time": strftime("%Y-%m-%d %H:%M:%S"),
+                  "id": LINUXCNCSTATUS.errorid + 1
+              }
+              LINUXCNCSTATUS.errorid += 1
+              reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+      except Exception as ex:
+        print ex
+        lastLCNCerror = {
+          "kind": "eject_usb",
+          "type":"error",
+          "text": "Failed to unmount USB drive. Exception message:\n %s" % (ex.output),
+          "time": strftime("%Y-%m-%d %H:%M:%S"),
+          "id": LINUXCNCSTATUS.errorid + 1
+        }
+        LINUXCNCSTATUS.errorid += 1
+        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+          
+      return reply
 
     def restart_linuxcnc_and_rockhopper( self ):
         global POCKETNC_DIRECTORY
@@ -1815,6 +1934,8 @@ class CommandItem( object ):
                     reply = self.add_user( passed_command_dict.get('username',passed_command_dict['0']).strip(), passed_command_dict.get('password',passed_command_dict['1']).strip() )
                 elif (self.name == 'reset_clock'):
                     reply = self.reset_run_time_clock()
+                elif (self.name == 'eject_usb'):
+                    reply = self.eject_usb()
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1833,6 +1954,7 @@ CommandItems = {}
 CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # Pre-defined Command Items
@@ -2562,7 +2684,11 @@ def main():
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
-    logging.basicConfig(filename=os.path.join(application_path,'linuxcnc_webserver.log'),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
+    log_exists = os.path.isfile("/var/log/linuxcnc_webserver.log")
+    if not log_exists:
+        subprocess.call(['sudo', 'touch', "/var/log/linuxcnc_webserver.log"])
+        subprocess.call(['sudo', 'chmod', '666', "/var/log/linuxcnc_webserver.log"])
+    logging.basicConfig(filename=os.path.join("/var/log/linuxcnc_webserver.log"),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.ERROR)
  
     #rpdb2.start_embedded_debugger("password")
 
