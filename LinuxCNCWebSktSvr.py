@@ -143,7 +143,7 @@ class LinuxCNCStatusPoller(object):
         self.scheduler = tornado.ioloop.PeriodicCallback( self.poll_update, UpdateStatusPollPeriodInMilliSeconds, io_loop=main_loop )
         self.scheduler.start()
         
-        # begin the poll-update loop of the linuxcnc system
+        # begin the poll_update_errors loop of the linuxcnc system
         self.scheduler_errors = tornado.ioloop.PeriodicCallback( self.poll_update_errors, UpdateErrorPollPeriodInMilliseconds, io_loop=main_loop )
         self.scheduler_errors.start()
         
@@ -214,9 +214,6 @@ class LinuxCNCStatusPoller(object):
         self.sig_dict = {}
         
         self.counter = 0
-        
-        self.hal_poll_init()
-        
 
     def add_observer(self, callback):
         self.observers.append(callback)
@@ -232,83 +229,6 @@ class LinuxCNCStatusPoller(object):
 
     def clear_all(self, matching_connection):
         self.obervers = []
-
-    def hal_poll_init(self):
-
-        # halcmd can take 200ms or more to run, so run poll updates in a thread so as not to slow the server
-        # requests for hal pins and sigs will read the results from the most recent update
-        def hal_poll_thread(self):
-            global instance_number
-            myinstance = instance_number
-            pollStartDelay = 0
-
-            s = linuxcnc.stat()
-            try:
-                s.poll()
-                is_alive = True
-                print "WE'RE ALIVE"
-            except:
-                is_alive = False
-                print "WE'RE NOT ALIVE"
-
-            while (myinstance == instance_number):
-                
-                # first, check if linuxcnc is running at all
-                # if (not os.path.isfile( '/tmp/linuxcnc.lock' ) or os.path.isfile('/tmp/linuxcnc.shutdown') ):
-                # if (not os.path.isfile( '/tmp/linuxcnc.lock' ) ):
-                if not is_alive:
-                    pollStartDelay = 0
-                    self.hal_mutex.acquire()
-                    try:
-                        if ( self.linuxcnc_is_alive ):
-                            print "LinuxCNC has stopped."
-                        self.linuxcnc_is_alive = False
-                        self.pin_dict = {}
-                        self.sig_dict = {}
-                    finally:
-                        self.hal_mutex.release()
-                    time.sleep(UpdateHALPollPeriodInMilliSeconds/1000.0)
-                    continue
-                else:
-                    if ( not self.linuxcnc_is_alive ):
-                        print "LinuxCNC has started."
-                    self.linuxcnc_is_alive = True
-
-                self.p = subprocess.Popen( ['halcmd', '-s', 'show', 'pin'] , stderr=subprocess.PIPE, stdout=subprocess.PIPE )
-                rawtuple = self.p.communicate()
-                if ( len(rawtuple[0]) <= 0 ):
-                    time.sleep(UpdateHALPollPeriodInMilliSeconds/1000.0)
-                    continue
-                raw = rawtuple[0].split('\n')
-
-                pins = [ filter( lambda a: a != '', [x.strip() for x in line.split(' ')] ) for line in raw ]
-
-                # UPDATE THE DICTIONARY OF PIN INFO
-                # Acquire the mutex so we don't step on other threads
-                self.hal_mutex.acquire()
-                try:
-                    self.pin_dict = {}
-                    self.sig_dict = {}
-
-                    for p in pins:
-                        if len(p) > 5:
-                            # if there is a signal listed on this pin, make sure
-                            # that signal is in our signal dictionary
-                            self.sig_dict[ p[6] ] = p[3]
-                        if len(p) >= 5:
-                            self.pin_dict[ p[4] ] = p[3]
-                finally:
-                    self.hal_mutex.release()
-
-                # before starting the next check, sleep a little so we don't use all the CPU
-                time.sleep(UpdateHALPollPeriodInMilliSeconds/1000.0)
-            print "HAL Monitor exiting... ",myinstance, instance_number
-
-        #Main part of hal_poll_init:
-        # Create a thread for checking the HAL pins and sigs
-        self.hal_mutex = threading.Lock()
-        self.hal_thread = threading.Thread(target = hal_poll_thread, args=(self,))
-        self.hal_thread.start()
 
     def poll_update_errors(self):
       global lastLCNCerror
@@ -451,6 +371,7 @@ class LinuxCNCStatusPoller(object):
                 self.del_observer(observer)
 
 
+
 # *****************************************************
 # Global LinuxCNCStatus Polling Object
 # *****************************************************
@@ -473,6 +394,8 @@ class StatusItem( object ):
         self.requiresLinuxCNCUp = requiresLinuxCNCUp
         self.coreLinuxCNCVariable = coreLinuxCNCVariable
         self.isasync = isAsync
+        self.halBinding = None
+
 
     @staticmethod
     def from_name( name ):
@@ -841,9 +764,9 @@ class StatusItem( object ):
                     "ncfiles": ncfiles_used
                 },
                 "addresses": [],
-# Format date/time so that javascript can parse it simply with new Date(string) while
-# and get the correct date and time regardless of time zone. The browser can then show
-# the local time zone.
+                # Format date/time so that javascript can parse it simply with new Date(string) while
+                # and get the correct date and time regardless of time zone. The browser can then show
+                # the local time zone.
                 "date": str(datetime.datetime.utcnow().strftime("%a %b %d %H:%M:%S UTC %Y"))
             }
 
@@ -899,6 +822,33 @@ class StatusItem( object ):
             ret['data'] = ''
         return ret
 
+    def get_hal_binding( self ):
+        ret = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":"" }
+        if self.halBinding is None:
+            try:
+                if self.name.find('halpin_') is 0:
+                    self.halBinding = machinekit.hal.Pin( self.name[7:] )
+                else:
+                    self.halBinding = machinekit.hal.Signal( self.name[7:] )
+            except RuntimeError as ex:
+                print 'RuntimeError error binding StatusItem attribute to HAL object: %s' % (ex)
+                ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+                ret['data'] = ''
+                return ret
+        try:
+            ret['data'] = self.halBinding.get()
+            # Bools need to be converted to all cap strings because that is the format outputted by HALCMD, and the UI was written when we were using HALCMD
+            if type(ret['data']) == bool:
+                if ret['data']:
+                  ret['data'] = 'TRUE'
+                else:
+                  ret['data'] = 'FALSE'
+        except Exception as ex:
+            print 'Exception getting StatusItem HAL Pin value: %s' % (ex)
+            ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+            ret['data'] = ''
+        return ret
+
 
     # called in on_new_poll to update the current value of a status item
     def get_cur_status_value( self, linuxcnc_status_poller, item_index, command_dict, async_buffer=None, async_lock=None ):
@@ -919,27 +869,13 @@ class StatusItem( object ):
             if (not self.coreLinuxCNCVariable):
 
                 # these are the "special" variables, not using the LinuxCNC status object
-                if (self.name.find('halpin_') is 0):
-                    linuxcnc_status_poller.hal_mutex.acquire()
-                    try:
-                        ret['data'] = linuxcnc_status_poller.pin_dict.get( self.name[7:], LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER )
-                        if ( ret['data'] == LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER ):
-                            ret['code'] = ret['data']
-                        if self.name.find('halpin_hss_sensors') is 0:
-                            if( self.name.find('pressure') != -1 ):
-                              self.update_hss_sensor_data(ret['data'], pressureData, 0.001)
-                            elif( self.name.find('temperature') != -1 ):
-                              self.update_hss_sensor_data(ret['data'], temperatureData, 0.1)
-                    finally:
-                        linuxcnc_status_poller.hal_mutex.release()
-                elif (self.name.find('halsig_') is 0):
-                    linuxcnc_status_poller.hal_mutex.acquire()
-                    try:
-                        ret['data'] = linuxcnc_status_poller.sig_dict.get( self.name[7:], LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER )
-                        if ( ret['data'] == LinuxCNCServerCommand.REPLY_INVALID_COMMAND_PARAMETER ):
-                            ret['code'] = ret['data']
-                    finally:
-                        linuxcnc_status_poller.hal_mutex.release()
+                if (self.name.find('halpin_') is 0) or (self.name.find('halsig_') is 0):
+                    ret = self.get_hal_binding()
+                    if self.name.find('halpin_hss_sensors') is 0:
+                        if( self.name.find('pressure') != -1 ):
+                          self.update_hss_sensor_data(ret['data'], pressureData, 0.001)
+                        elif( self.name.find('temperature') != -1 ):
+                          self.update_hss_sensor_data(ret['data'], temperatureData, 0.1)
                 elif (self.name.find('backplot_async') is 0):
                      ret = self.backplot_async(async_buffer, async_lock,linuxcnc_status_poller)
                 elif (self.name.find('backplot') is 0):
@@ -2065,21 +2001,21 @@ class HALInterface( object ):
                 print "Failed to create hal component, LinuxCNCWebSktSvr%s, already created it? " % i, e
                 i += 1
         
-#    def Tick( self ):
-#        if ( self.h is not None ):
-#            self.keepalive_counter = self.keepalive_counter + 1
-#            self.h['keepalive_counter'] = self.keepalive_counter
-#            previous_time = self.time_of_last_keepalive
-#            self.time_of_last_keepalive = time.time()
-#            self.time_elapsed = self.time_of_last_keepalive - previous_time
-#            self.h['time_since_keepalive'] = self.time_elapsed
+    # def Tick( self ):
+    #     if ( self.h is not None ):
+    #         self.keepalive_counter = self.keepalive_counter + 1
+    #         self.h['keepalive_counter'] = self.keepalive_counter
+    #         previous_time = self.time_of_last_keepalive
+    #         self.time_of_last_keepalive = time.time()
+    #         self.time_elapsed = self.time_of_last_keepalive - previous_time
+    #         self.h['time_since_keepalive'] = self.time_elapsed
 
-#    def poll_update( self ):
-#        if ( self.h is not None ):
-#            previous_time = self.time_of_last_keepalive
-#            now_time = time.time()
-#            self.time_elapsed = now_time - previous_time
-#            self.h['time_since_keepalive'] = self.time_elapsed
+    # def poll_update( self ):
+    #     if ( self.h is not None ):
+    #         previous_time = self.time_of_last_keepalive
+    #         now_time = time.time()
+    #         self.time_elapsed = now_time - previous_time
+    #         self.h['time_since_keepalive'] = self.time_elapsed
 
     def set_p( self, name, value ):
         if self.h is not None:
