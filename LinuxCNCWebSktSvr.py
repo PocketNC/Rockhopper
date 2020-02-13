@@ -701,7 +701,22 @@ class StatusItem( object ):
             code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return { "code":code, "data":file_list, "directory":directory }
 
-    def map_usb_files( self ):
+    def detect_usb( self ):
+      detected = False
+      try:
+        # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
+        usbDirBase = "/media/usb"
+        usbDir = ""
+        for mountDirIdx in range(8):
+          usbDir = usbDirBase + str( mountDirIdx )
+          if ( os.path.exists(usbDir) and len(os.listdir(usbDir)) > 0 ):
+            detected = True
+      except:
+        pass
+      reply = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":detected }
+      return reply
+
+    def map_usb( self ):
       try:
         usbMap = { "detected" : False }
         # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
@@ -837,12 +852,6 @@ class StatusItem( object ):
                 return ret
         try:
             ret['data'] = self.halBinding.get()
-            # Bools need to be converted to all cap strings because that is the format outputted by HALCMD, and the UI was written when we were using HALCMD
-            if type(ret['data']) == bool:
-                if ret['data']:
-                  ret['data'] = 'TRUE'
-                else:
-                  ret['data'] = 'FALSE'
         except Exception as ex:
             print 'Exception getting StatusItem HAL Pin value: %s' % (ex)
             ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
@@ -853,6 +862,7 @@ class StatusItem( object ):
     # called in on_new_poll to update the current value of a status item
     def get_cur_status_value( self, linuxcnc_status_poller, item_index, command_dict, async_buffer=None, async_lock=None ):
         global lastLCNCerror
+
         ret = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":"" } 
         try:
             if (self.name == 'running'):
@@ -890,8 +900,10 @@ class StatusItem( object ):
                     ret = self.get_current_version()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
-                elif (self.name == 'usb'):
-                    ret = self.map_usb_files()
+                elif (self.name == 'usb_detected'):
+                    ret = self.detect_usb()
+                elif (self.name == 'usb_map'):
+                    ret = self.map_usb()
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
@@ -1058,7 +1070,8 @@ StatusItem( name='pressure_data',            coreLinuxCNCVariable=False, watchab
 StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchable=True, valtype='float[]', help='Temperature data history, back as far as one hour. Key is timestamp.' ).register_in_dict( StatusItems )
 
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
-StatusItem( name='usb',                      coreLinuxCNCVariable=False, watchable=True, valtype='dict',help='Create a nested dictionary that represents the folder structure of an usb device that has been mounted at /media/usb' ).register_in_dict( StatusItems )
+StatusItem( name='usb_detected',             coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media' ).register_in_dict( StatusItems )
+StatusItem( name='usb_map',                  coreLinuxCNCVariable=False, watchable=False, valtype='dict',help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
