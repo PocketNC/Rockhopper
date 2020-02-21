@@ -2435,6 +2435,19 @@ class CalibrationUpload(tornado.web.RequestHandler):
     self.render( 'LinuxCNCSandbox.html' )
 
   def post(self):
+
+    # An 'enable swap file' checkbox has been added to the Calibration Upload form.
+    # If it is checked when uploading, we will ensure that a swap file has been enabled and created
+    # This was done primarily to remove the need to do this manually through the UI during calibration
+    try:
+      self.get_argument('enableSwap')
+      createSwapCommandDict = {'0': '256', 'command': 'put', 'id': 'create_swap', 'name': 'create_swap'}
+      CommandItems['create_swap'].execute( createSwapCommandDict, LINUXCNCSTATUS)
+      enableSwapCommandDict = {'command': 'put', 'id': 'enable_swap', 'name': 'enable_swap'}
+      CommandItems['enable_swap'].execute(enableSwapCommandDict, LINUXCNCSTATUS)
+    except:
+      pass
+
     fileinfo = self.request.files['calibration_data'][0]
     try:
       tmp = tempfile.NamedTemporaryFile(delete=False)
@@ -2447,9 +2460,15 @@ class CalibrationUpload(tornado.web.RequestHandler):
       zip_ref.extractall(tmpDir)
       zip_ref.close()
 
-      acompFile = os.path.join(tmpDir, "a.comp")
-      bcompFile = os.path.join(tmpDir, "b.comp")
-      calibrationFile = os.path.join(tmpDir, "CalibrationOverlay.inc")
+      calFilesFound = []
+
+      for path, dirs, files in os.walk(tmpDir):
+        if "a.comp" in files:
+          acompFile = os.path.join(path, "a.comp")
+        if "b.comp" in files:
+          bcompFile = os.path.join(path, "b.comp")
+        if "CalibrationOverlay.inc" in files:
+          calibrationFile = os.path.join(path, "CalibrationOverlay.inc")
 
       if os.path.isfile(acompFile) and os.path.isfile(bcompFile) and os.path.isfile(calibrationFile):
         shutil.copy(acompFile, SETTINGS_PATH)
@@ -2457,7 +2476,7 @@ class CalibrationUpload(tornado.web.RequestHandler):
         shutil.copy(calibrationFile, SETTINGS_PATH)
         self.write("SUCCESS")
       else:
-        self.write("ERROR: zip file must constain a.comp, b.comp and CalibrationOverlay.inc.")
+        self.write("ERROR: zip file must contain a.comp, b.comp and CalibrationOverlay.inc.")
     except Exception as ex:
       self.write("ERROR: " + str(ex))
     finally:

@@ -41,6 +41,8 @@ Serial Number <input type="text" id="calibrationSerialNumber" value=""><button o
 <form id="calibrationUploadForm" method="POST" action="/upload/calibration" enctype="multipart/form-data">
 <input type="file" name="calibration_data">
 <button>Upload</button>
+<input type="checkbox" name="enableSwap" id="enableSwap" value="shouldEnableSwap" checked>
+<label for="enableSwap"> Enable swap file on calibration upload</label>
 </form>
 
 <div id="uploadMsg"></div>
