@@ -2460,23 +2460,42 @@ class CalibrationUpload(tornado.web.RequestHandler):
       zip_ref.extractall(tmpDir)
       zip_ref.close()
 
-      calFilesFound = []
+      calFilesUploaded = {}
+      for calFile in ['CalibrationOverlay.inc', 'a.comp', 'b.comp', 'x.comp', 'y.comp', 'z.comp']:
+        calFilesUploaded[calFile] = False
 
       for path, dirs, files in os.walk(tmpDir):
-        if "a.comp" in files:
-          acompFile = os.path.join(path, "a.comp")
-        if "b.comp" in files:
-          bcompFile = os.path.join(path, "b.comp")
-        if "CalibrationOverlay.inc" in files:
-          calibrationFile = os.path.join(path, "CalibrationOverlay.inc")
+        for fileName, isUploaded in calFilesUploaded.iteritems():
+          if ( not isUploaded ) and ( fileName in files ):
+            calFilePath = os.path.join(path, fileName)
+            shutil.copy( calFilePath, SETTINGS_PATH )
+            calFilesUploaded[fileName] = True
 
-      if os.path.isfile(acompFile) and os.path.isfile(bcompFile) and os.path.isfile(calibrationFile):
-        shutil.copy(acompFile, SETTINGS_PATH)
-        shutil.copy(bcompFile, SETTINGS_PATH)
-        shutil.copy(calibrationFile, SETTINGS_PATH)
-        self.write("SUCCESS")
+      if calFilesUploaded['a.comp'] and calFilesUploaded['b.comp'] and calFilesUploaded['CalibrationOverlay.inc']:
+        responseText = 'Success!'
       else:
-        self.write("ERROR: zip file must contain a.comp, b.comp and CalibrationOverlay.inc.")
+        responseText = 'Warning! '
+        if not calFilesUploaded['CalibrationOverlay.inc']:
+          responseText += 'CalibrationOverlay.inc '
+        if not calFilesUploaded['a.comp']:
+          responseText += 'a.comp '
+        if not calFilesUploaded['b.comp']:
+          responseText += 'b.comp '
+        responseText += 'not found!'
+
+      responseTextUploadedFiles = ''
+
+      for fileName, isUploaded in calFilesUploaded.iteritems():
+        if isUploaded:
+          if responseTextUploadedFiles == '':
+            responseTextUploadedFiles += ' Uploaded '
+            responseTextUploadedFiles += fileName
+          else:
+            responseTextUploadedFiles += ', '
+            responseTextUploadedFiles += fileName
+
+      responseText += responseTextUploadedFiles
+      self.write(responseText)
     except Exception as ex:
       self.write("ERROR: " + str(ex))
     finally:

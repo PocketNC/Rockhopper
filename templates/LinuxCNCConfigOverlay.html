@@ -59,8 +59,8 @@ Serial Number <input type="text" id="calibrationSerialNumber" value=""><button o
 
     request.addEventListener("load", function(e) {
       console.log(e.target.responseText);
-      if(e.target.responseText == "SUCCESS") {
-        uploadMsg.innerHTML = "<span style='color: green'>Success!</span>";
+      if(e.target.responseText.indexOf("Success!") === 0) {
+        uploadMsg.innerHTML = "<span style='color: green'>" + e.target.responseText + "</span>";
       } else {
         uploadMsg.innerHTML = "<span style='color: red'>" + e.target.responseText + "</span>";
       }
