@@ -475,6 +475,7 @@ EditableGrid.prototype.initializeGrid = function(  )
 
             var vals = gEditableGrid.getRowValues(rowIndex);
             vals['section'] = ConfigCurrentSectionSelection;
+            vals['rowId'] = row.rowId;
             console.log(vals);
 
             var cmd = JSON.stringify({ "id":"TempSetINIData", "command":"put", "name":"temp_set_config_item", "data":vals });
@@ -743,9 +744,11 @@ function ConfigSocketMessageHandler(evt)
         a.click();
     } else if(result["id"] === "TempSetINIData") {
         if(result["code"] === "?OK") {
-          alert("Configuration change has temporarily taken effect. Press the Save Configuration button to store permanently.")
+          document.getElementById("temp_config_change_msg").style.display = "block";
+          document.getElementById("LinuxCNC Configuration File_" + result["rowId"]).style.color = "darkgreen";
         } else {
-          alert("Configuration change has NOT taken effect. Press the Save Configuration button then Restart LinuxCNC and Rockhopper in the System tab for the change to take effect. ")
+          document.getElementById("restart_required_msg").style.display = "block";
+          document.getElementById("LinuxCNC Configuration File_" + result["rowId"]).style.color = "darkorange";
         }
     } else {
         alert("Last command reply: " + result["code"].substring(1));

@@ -1127,7 +1127,7 @@ class CommandItem( object ):
         global HAL_INTERFACE
         global linuxcnc_command
 
-        reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
+        reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'rowId': commandDict['data']['rowId'] }
 
         iniitem2halpins = {
             'AXIS_0': {
@@ -2435,7 +2435,7 @@ class CalibrationUpload(tornado.web.RequestHandler):
     self.render( 'LinuxCNCSandbox.html' )
 
   def post(self):
-
+    
     # An 'enable swap file' checkbox has been added to the Calibration Upload form.
     # If it is checked when uploading, we will ensure that a swap file has been enabled and created
     # This was done primarily to remove the need to do this manually through the UI during calibration
@@ -2448,61 +2448,66 @@ class CalibrationUpload(tornado.web.RequestHandler):
     except:
       pass
 
-    fileinfo = self.request.files['calibration_data'][0]
     try:
+      fileinfo = self.request.files['calibration_data'][0]
       tmp = tempfile.NamedTemporaryFile(delete=False)
       tmp.file.write(fileinfo['body'])
       tmp.file.close()
 
       tmpDir = tempfile.mkdtemp()
-          
-      zip_ref = zipfile.ZipFile(tmp.name, 'r')
-      zip_ref.extractall(tmpDir)
-      zip_ref.close()
+      try:
+        zip_ref = zipfile.ZipFile(tmp.name, 'r')
+        zip_ref.extractall(tmpDir)
+        zip_ref.close()
 
-      calFilesUploaded = {}
-      for calFile in ['CalibrationOverlay.inc', 'a.comp', 'b.comp', 'x.comp', 'y.comp', 'z.comp']:
-        calFilesUploaded[calFile] = False
+        calFilesUploaded = {}
+        for calFile in ['CalibrationOverlay.inc', 'a.comp', 'b.comp', 'x.comp', 'y.comp', 'z.comp']:
+          calFilesUploaded[calFile] = False
 
-      for path, dirs, files in os.walk(tmpDir):
+        for path, dirs, files in os.walk(tmpDir):
+          for fileName, isUploaded in calFilesUploaded.iteritems():
+            if ( not isUploaded ) and ( fileName in files ):
+              calFilePath = os.path.join(path, fileName)
+              shutil.copy( calFilePath, SETTINGS_PATH )
+              calFilesUploaded[fileName] = True
+
+        if calFilesUploaded['a.comp'] and calFilesUploaded['b.comp'] and calFilesUploaded['CalibrationOverlay.inc']:
+          responseText = 'Success!'
+        else:
+          responseText = 'Warning! Files not found: '
+          notFoundText = ""
+          if not calFilesUploaded['CalibrationOverlay.inc']:
+            notFoundText += 'CalibrationOverlay.inc'
+          if not calFilesUploaded['a.comp']:
+            notFoundText += 'a.comp' if len(notFoundText) == 0 else ', a.comp'
+          if not calFilesUploaded['b.comp']:
+            notFoundText += 'b.comp' if len(notFoundText) == 0 else ', b.comp'
+          responseText += notFoundText
+          responseText += '.'
+
+        responseTextUploadedFiles = ''
+
         for fileName, isUploaded in calFilesUploaded.iteritems():
-          if ( not isUploaded ) and ( fileName in files ):
-            calFilePath = os.path.join(path, fileName)
-            shutil.copy( calFilePath, SETTINGS_PATH )
-            calFilesUploaded[fileName] = True
+          if isUploaded:
+            if responseTextUploadedFiles == '':
+              responseTextUploadedFiles += ' Uploaded files: '
+              responseTextUploadedFiles += fileName
+            else:
+              responseTextUploadedFiles += ', '
+              responseTextUploadedFiles += fileName
 
-      if calFilesUploaded['a.comp'] and calFilesUploaded['b.comp'] and calFilesUploaded['CalibrationOverlay.inc']:
-        responseText = 'Success!'
-      else:
-        responseText = 'Warning! '
-        if not calFilesUploaded['CalibrationOverlay.inc']:
-          responseText += 'CalibrationOverlay.inc '
-        if not calFilesUploaded['a.comp']:
-          responseText += 'a.comp '
-        if not calFilesUploaded['b.comp']:
-          responseText += 'b.comp '
-        responseText += 'not found!'
+        responseText += responseTextUploadedFiles
+        self.write(responseText)
+      except Exception as ex:
+        self.write("ERROR: " + str(ex))
+      finally:
+        if os.path.isfile(tmp.name):
+          os.remove(tmp.name)
+        if os.path.isdir(tmpDir):
+          shutil.rmtree(tmpDir)
 
-      responseTextUploadedFiles = ''
-
-      for fileName, isUploaded in calFilesUploaded.iteritems():
-        if isUploaded:
-          if responseTextUploadedFiles == '':
-            responseTextUploadedFiles += ' Uploaded '
-            responseTextUploadedFiles += fileName
-          else:
-            responseTextUploadedFiles += ', '
-            responseTextUploadedFiles += fileName
-
-      responseText += responseTextUploadedFiles
-      self.write(responseText)
     except Exception as ex:
       self.write("ERROR: " + str(ex))
-    finally:
-      if os.path.isfile(tmp.name):
-        os.remove(tmp.name)
-      if os.path.isdir(tmpDir):
-        shutil.rmtree(tmpDir)
       
 
 

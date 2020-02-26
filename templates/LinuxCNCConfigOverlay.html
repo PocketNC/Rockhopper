@@ -59,9 +59,13 @@ Serial Number <input type="text" id="calibrationSerialNumber" value=""><button o
 
     request.addEventListener("load", function(e) {
       console.log(e.target.responseText);
-      if(e.target.responseText.indexOf("Success!") === 0) {
+      if(e.target.responseText.indexOf("Success") === 0) {
         uploadMsg.innerHTML = "<span style='color: green'>" + e.target.responseText + "</span>";
-      } else {
+      } 
+      else if(e.target.responseText.indexOf("Warning") == 0 && e.target.responseText.indexOf("Uploaded") !== -1)  {
+        uploadMsg.innerHTML = "<span style='color: darkorange'>" + e.target.responseText + "</span>";
+      }
+      else {
         uploadMsg.innerHTML = "<span style='color: red'>" + e.target.responseText + "</span>";
       }
     });
@@ -85,25 +89,31 @@ Serial Number <input type="text" id="calibrationSerialNumber" value=""><button o
 <br/>
 </div>
 
-        <div id="top_button_bar">
-        <button type="button" id="add_new_section_but" value="Add_New_Section" onclick="ConfigAddSection();">Add New Section</button>
-        <button type="button" id="remove_section_but" value="Remove_Section" onclick="ConfigRemoveSection();">Remove Section</button>
-        <button type="button" id="add_new_value_but" value="Add_New_Value" onclick="ConfigAddValue();">Add New Value</button>        
-        <button type="button" id="write_config" value="Write_Config" onclick="ConfigWrite();">Save Configuration</button>        
-        </div>
-        
-        <div id="midcol">
-            <div id="wrap">
-                <div id="grid_title">INI File Entries for section:</div>
-                <div id="ConfigTable"></div>
-            </div>
-            <br>
-        </div>
+<div id="top_button_bar">
+    <button type="button" id="add_new_section_but" value="Add_New_Section" onclick="ConfigAddSection();">Add New Section</button>
+    <button type="button" id="remove_section_but" value="Remove_Section" onclick="ConfigRemoveSection();">Remove Section</button>
+    <button type="button" id="add_new_value_but" value="Add_New_Value" onclick="ConfigAddValue();">Add New Value</button>
+    <button type="button" id="write_config" value="Write_Config" onclick="ConfigWrite();">Save Configuration</button>
+    <div id="temp_config_change_msg" style="display: none; color: darkgreen;">
+      Temporary changes in effect. Save Configuration to make permanent.
+    </div>
+    <div id="restart_required_msg" style="display: none; color: darkorange">
+      Changes requiring restart detected. To put into effect, Save Configuration then go to System tab and Restart LinuxCNC and Rockhopper.
+    </div>
+</div>
 
-        <div id="leftcol">
-            <div id="menu_title"><h2>INI File Sections:</h2></div>
-            <div id="left_menu"></div>
-        </div>
+<div id="midcol">
+    <div id="wrap">
+        <div id="grid_title">INI File Entries for section:</div>
+        <div id="ConfigTable"></div>
+    </div>
+    <br>
+</div>
+
+<div id="leftcol">
+    <div id="menu_title"><h2>INI File Sections:</h2></div>
+    <div id="left_menu"></div>
+</div>
 
 {% end %}
 
