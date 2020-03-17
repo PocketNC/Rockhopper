@@ -864,10 +864,7 @@ class StatusItem( object ):
         # as a workaround, we will reset the interpreter when this is detected. This should only happen once per boot
         if reportedIndex == 0:
           linuxcnc_command.reset_interpreter()
-          actualIndex = self.get_startup_offset_values()['g5x_index']
-        else:
-          actualIndex = reportedIndex
-        return actualIndex
+        return reportedIndex
       except Exception as ex:
         print ex
 
@@ -1019,11 +1016,12 @@ StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinux
 StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
 StatusItem( name='dogtag',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='dogtag' ).register_in_dict( StatusItems )
 StatusItem( name='flood',                    watchable=True, valtype='int' ,    help='flood enabled' ).register_in_dict( StatusItems )
-# We've identified a bug in linuxcnc python module that causes incorrect initial values for g5x_index, g5x_offset, and g92_offset
-# Values are always reported as 0 when first started, even if behind the scenes offsets are in effect
+
+# Linuxcnc python module is reporting incorrect incorrect initial values for g5x_index, g5x_offset, and g92_offset
+# Initial values are always reported as 0, behind the scenes whatever was active at shutdown will be active after startup.
 # Also, 0 is an invalid value for g5x_index, it should be between 1 and 9 to represent systems G54-G59, G59.1, G59.2, and 59.3
-# To fix this we've altered the g5x_index StatusItem so that it checks for this broken initial condition
-# If we are in the broken state, we then run linuxcnc.command().reset_interpreter() to refetch values, which are now correct.
+# To fix this we've altered the g5x_index StatusItem so that it checks for this invalid condition
+# If we are in this broken state, we then run linuxcnc.command().reset_interpreter() which will cause correct values to be fetched.
 StatusItem( name='g5x_index',                coreLinuxCNCVariable=False, watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_offset',               watchable=True, valtype='float[]', help='offset of the currently active coordinate system, a pose' ).register_in_dict( StatusItems )
 StatusItem( name='g92_offset',               watchable=True, valtype='float[]', help='pose of the current g92 offset' ).register_in_dict( StatusItems )
