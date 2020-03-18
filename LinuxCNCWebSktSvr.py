@@ -396,6 +396,7 @@ class StatusItem( object ):
         self.isasync = isAsync
         self.halBinding = None
 
+
     @staticmethod
     def from_name( name ):
         global StatusItems
@@ -857,16 +858,6 @@ class StatusItem( object ):
             ret['data'] = ''
         return ret
 
-    def get_g5x_index( self, status_poller ):
-      try:
-        reportedIndex = status_poller.linuxcnc_status.__getattribute__( 'g5x_index' )
-        # linuxcnc module seems to incorrectly always initialize g5x_index as 0 regardless of the actual offset.
-        # as a workaround, we will reset the interpreter when this is detected. This should only happen once per boot
-        if reportedIndex == 0:
-          linuxcnc_command.reset_interpreter()
-        return reportedIndex
-      except Exception as ex:
-        print ex
 
     # called in on_new_poll to update the current value of a status item
     def get_cur_status_value( self, linuxcnc_status_poller, item_index, command_dict, async_buffer=None, async_lock=None ):
@@ -948,8 +939,6 @@ class StatusItem( object ):
                     ret['data'] = pressureData[:]
                 elif (self.name == 'temperature_data'):
                     ret['data'] = temperatureData[:]
-                elif (self.name == 'g5x_index'):
-                    ret['data'] = self.get_g5x_index(linuxcnc_status_poller)
             else:
                 # Variables that use the LinuxCNC status poller
                 if (self.isarray):
@@ -1016,13 +1005,7 @@ StatusItem( name='current_version',          requiresLinuxCNCUp=False, coreLinux
 StatusItem( name='board_revision',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='current board revision' ).register_in_dict( StatusItems )
 StatusItem( name='dogtag',          requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='string' , help='dogtag' ).register_in_dict( StatusItems )
 StatusItem( name='flood',                    watchable=True, valtype='int' ,    help='flood enabled' ).register_in_dict( StatusItems )
-
-# Linuxcnc python module is reporting incorrect incorrect initial values for g5x_index, g5x_offset, and g92_offset
-# Initial values are always reported as 0, behind the scenes whatever was active at shutdown will be active after startup.
-# Also, 0 is an invalid value for g5x_index, it should be between 1 and 9 to represent systems G54-G59, G59.1, G59.2, and 59.3
-# To fix this we've altered the g5x_index StatusItem so that it checks for this invalid condition
-# If we are in this broken state, we then run linuxcnc.command().reset_interpreter() which will cause correct values to be fetched.
-StatusItem( name='g5x_index',                coreLinuxCNCVariable=False, watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
+StatusItem( name='g5x_index',                watchable=True, valtype='int' ,    help='currently active coordinate system, G54=0, G55=1 etc.' ).register_in_dict( StatusItems )
 StatusItem( name='g5x_offset',               watchable=True, valtype='float[]', help='offset of the currently active coordinate system, a pose' ).register_in_dict( StatusItems )
 StatusItem( name='g92_offset',               watchable=True, valtype='float[]', help='pose of the current g92 offset' ).register_in_dict( StatusItems )
 StatusItem( name='gcodes',                   watchable=True, valtype='int[]' ,  help='currently active G-codes. Tuple of 16 ints.' ).register_in_dict( StatusItems )
