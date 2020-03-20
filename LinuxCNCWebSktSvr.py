@@ -60,6 +60,8 @@ from netifaces import interfaces, ifaddresses, AF_INET
 from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
 
+originRE = re.compile("https?://([a-z0-9]+\.)?pocketnc.com")
+
 def set_date_string(dateString):
   subprocess.call(['sudo', 'date', '-s', dateString])
 
@@ -2246,7 +2248,7 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
             if origin in addresses or origin in addresses8000:
                 return True
         
-        return origin in [ "http://www.pocketnc.com", "https://pocketnc.github.io", "http://pocketnc.local" ]
+        return True if originRE.match(origin) else False
     
     def open(self,arg):
         global LINUXCNCSTATUS
