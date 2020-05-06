@@ -60,6 +60,8 @@ from netifaces import interfaces, ifaddresses, AF_INET
 from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
 
+
+
 originRE = re.compile("https?://([a-z0-9]+\.)?pocketnc.com")
 
 def set_date_string(dateString):
@@ -121,6 +123,13 @@ BackplotLock = threading.Lock()
 uploadingFile = None
 pressureData = []
 temperatureData = []
+
+def sigterm_handler(_signo, _stack_frame):
+    global main_loop
+    main_loop.stop()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, sigterm_handler)
 
 # *****************************************************
 # Class to poll linuxcnc for status.  Other classes can request to be notified
