@@ -125,11 +125,11 @@ pressureData = []
 temperatureData = []
 
 def sigterm_handler(_signo, _stack_frame):
-    global main_loop
     main_loop.stop()
     sys.exit(0)
 
 signal.signal(signal.SIGTERM, sigterm_handler)
+signal.signal(signal.SIGINT, sigterm_handler)
 
 # *****************************************************
 # Class to poll linuxcnc for status.  Other classes can request to be notified
