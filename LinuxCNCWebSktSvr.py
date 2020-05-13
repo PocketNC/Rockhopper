@@ -59,6 +59,7 @@ from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
 from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
+import httplib
 
 
 
@@ -124,9 +125,32 @@ uploadingFile = None
 pressureData = []
 temperatureData = []
 
+class GitHubConnectionMonitor( object ):
+  def __init__(self):
+    self.ableToConnect = False
+    self.stop = False
+  
+  def test_connection(self):
+    while True:
+      try:
+        conn = httplib.HTTPConnection('www.github.com')
+        conn.request('HEAD', '/pocketnc/pocketnc.git')
+        resp = conn.getresponse()
+        self.ableToConnect = resp.status < 400
+      except socket.gaierror:
+        self.ableToConnect = False
+      if self.stop:
+        break
+      time.sleep(1)
+    
+connectionMonitor = GitHubConnectionMonitor()
+connectionTestThread = threading.Thread(target=connectionMonitor.test_connection)
+connectionTestThread.start()
+
 def sigterm_handler(_signo, _stack_frame):
-    main_loop.stop()
-    sys.exit(0)
+  connectionMonitor.stop = True
+  main_loop.stop()
+  sys.exit(0)
 
 signal.signal(signal.SIGTERM, sigterm_handler)
 signal.signal(signal.SIGINT, sigterm_handler)
@@ -697,6 +721,10 @@ class StatusItem( object ):
 
         return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": all_versions }
 
+    def test_github_connection(self):
+      global connectionMonitor
+      return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": connectionMonitor.ableToConnect }
+
     def list_gcode_files( self, directory ):
         file_list = []
         code = LinuxCNCServerCommand.REPLY_COMMAND_OK
@@ -909,6 +937,8 @@ class StatusItem( object ):
                     ret = self.get_versions()
                 elif (self.name == 'current_version'):
                     ret = self.get_current_version()
+                elif (self.name == 'github_connection'):
+                    ret = self.test_github_connection()
                 elif (self.name == 'ls'):
                     ret = self.list_gcode_files( command_dict.get("directory", None) )
                 elif (self.name == 'usb_detected'):
@@ -1109,6 +1139,7 @@ StatusItem( name='rotary_motion_only',       coreLinuxCNCVariable=False, watchab
 # Array Status items
 StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
 StatusItem( name='axis',                     watchable=True, valtype='dict' ,   help='Axis Dictionary', isarray=True, arraylen=axis_length ).register_in_dict( StatusItems )
+StatusItem( name='github_connection',        requiresLinuxCNCUp=False, coreLinuxCNCVariable=False, watchable=True,valtype='bool' , help='Whether connection to the PocketNC github repository can be established.' ).register_in_dict( StatusItems )
 
 
 # *****************************************************
