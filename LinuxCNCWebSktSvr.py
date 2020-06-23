@@ -1257,6 +1257,13 @@ class CommandItem( object ):
 
         return reply
 
+    def set_m6_tool_probe( self, commandDict ):
+      global CALIBRATION_OVERLAY_FILE
+      ini_data = read_ini_data(CALIBRATION_OVERLAY_FILE)
+      set_parameter(ini_data, "POCKETNC_FEATURES", "M6_TOOL_PROBE", int(commandDict['0']))
+      write_ini_data(ini_data, CALIBRATION_OVERLAY_FILE)
+      return self.restart_linuxcnc_and_rockhopper()
+      
     # called in a "put_config" command to write INI data to INI file, completely re-writing the file
     def put_ini_data( self, commandDict ):
         global INI_FILENAME
@@ -1896,6 +1903,8 @@ class CommandItem( object ):
                     reply = self.reset_run_time_clock()
                 elif (self.name == 'eject_usb'):
                     reply = self.eject_usb()
+                elif (self.name == 'set_m6_tool_probe'):
+                    reply = self.set_m6_tool_probe(passed_command_dict)
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1916,6 +1925,7 @@ CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_nam
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='set_m6_tool_probe',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ], help="Set m6_tool_probe on/off.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
