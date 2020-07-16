@@ -105,6 +105,7 @@ B_COMP_FILE = os.path.join(POCKETNC_DIRECTORY, "Settings/b.comp")
 
 INI_FILENAME = ''
 INI_FILE_PATH = ''
+INI_FILE_CACHE = None
 
 CONFIG_FILENAME = '%s/Rockhopper/CLIENT_CONFIG.JSON' % POCKETNC_DIRECTORY
 
@@ -161,9 +162,8 @@ class LinuxCNCStatusPoller(object):
         # register listeners
         self.observers = []
         self.hal_observers = []
-
-        hss_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'HIGH_SPEED_SPINDLE')
-        self.is_hss = len(hss_ini_data['parameters']) > 0 and hss_ini_data['parameters'][0]['values']['value'] == '1'
+        hss_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'HIGH_SPEED_SPINDLE')
+        self.is_hss = hss_ini_data is not None and hss_ini_data['values']['value'] == '1'
         if self.is_hss:
           # wait here until the hss userspace components are loaded
           while True:
@@ -184,9 +184,8 @@ class LinuxCNCStatusPoller(object):
           self.hss_p_detect_abort_pin = None
           self.hss_t_abort_pin = None
           self.hss_t_detect_abort_pin = None
-
-        rtc_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
-        has_rtc = len(rtc_ini_data['parameters']) > 0 and rtc_ini_data['parameters'][0]['values']['value'] == '1'
+        rtc_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'RUN_TIME_CLOCK')
+        has_rtc = rtc_ini_data is not None and rtc_ini_data['values']['value'] == '1'
         if has_rtc:
           safetyCounter = 0
           while True:
@@ -203,9 +202,9 @@ class LinuxCNCStatusPoller(object):
         for n in range(5):
           print n
           self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
-
-        interlock_ini_data = read_ini_data(INI_FILENAME, 'POCKETNC_FEATURES', 'INTERLOCK')
-        self.has_interlock = len(interlock_ini_data['parameters']) > 0 and interlock_ini_data['parameters'][0]['values']['value'] == '1'
+        
+        interlock_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'INTERLOCK')
+        self.has_interlock = interlock_ini_data is not None and interlock_ini_data['values']['value'] == '1'
         if self.has_interlock:
           while True:
             try:
@@ -698,12 +697,13 @@ class StatusItem( object ):
         return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": all_versions }
 
     def list_gcode_files( self, directory ):
+        global INI_FILE_CACHE
         file_list = []
         code = LinuxCNCServerCommand.REPLY_COMMAND_OK
         try:
             if directory is None:
                 directory = "."
-                directory = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
+                directory = get_parameter(INI_FILE_CACHE, 'DISPLAY', 'PROGRAM_PREFIX' )['values']['value']
         except:
             pass
         try:
@@ -791,9 +791,7 @@ class StatusItem( object ):
             (total,used,available) = [ int(x) for x in df_data[totalIndex:totalIndex+3] ] 
 
             logs_used = int(subprocess.check_output(['sudo', 'du', '-k', '-d', '0', '/var/log']).split()[0])
-
-            ini_data = read_ini_data(INI_FILENAME)
-            ncfiles_path = get_parameter(ini_data, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
+            ncfiles_path = get_parameter(INI_FILE_CACHE, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
 
             ncfiles_used = int(subprocess.check_output(['du', '-k', '-d', '0', ncfiles_path]).split()[0])
 
@@ -1411,10 +1409,9 @@ class CommandItem( object ):
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_logs' }
 
     def clear_ncfiles(self, commandDict):
+        global INI_FILE_CACHE
         try:
-            ini_data = read_ini_data(INI_FILENAME)
-            ncfiles_path = get_parameter(ini_data, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
-
+            ncfiles_path = get_parameter(INI_FILE_CACHE, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
             subprocess.call(['find', ncfiles_path, '-type', 'f', '-exec', 'rm', '{}', ';'], cwd=POCKETNC_DIRECTORY)
         except:
             return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
@@ -1502,6 +1499,7 @@ class CommandItem( object ):
 
     def del_gcode_file(self, filename, linuxcnc_status_poller):
         global linuxcnc_command
+        global INI_FILE_CACHE
 
         reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
@@ -1512,9 +1510,8 @@ class CommandItem( object ):
 
             [openFilePath,openFile] = os.path.split( linuxcnc_status_poller.linuxcnc_status.file )
             
-            path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
-
-            openDefault = StatusItem.get_ini_data( only_section='DISPLAY', only_name='OPEN_FILE' )['data']['parameters'][0]['values']['value']
+            path = get_parameter(INI_FILE_CACHE, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
+            openDefault = get_parameter(INI_FILE_CACHE, "DISPLAY", "OPEN_FILE")["values"]["value"]
 
             if openFilePath and os.path.samefile(openFilePath,path) and openFile == f:
                 linuxcnc_command.program_open(openDefault)
@@ -1548,6 +1545,7 @@ class CommandItem( object ):
 
     def put_gcode_file( self, filename, data ):
         global linuxcnc_command
+        global INI_FILE_CACHE
  
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
@@ -1556,7 +1554,7 @@ class CommandItem( object ):
             # we will only look in the config directory, so we ignore path
             [h,f] = os.path.split( filename )
 
-            path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
+            path = get_parameter(INI_FILE_CACHE, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
             
             try:
                 fo = open( os.path.join( path, f ), 'w' )
@@ -1585,12 +1583,14 @@ class CommandItem( object ):
     def put_chunk_gcode_file( self, filename, data, start, end, ovw ):
         global linuxcnc_command
         global uploadingFile
+        global INI_FILE_CACHE
         reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
         try:
             # strip off just the filename, if a path was given
             # we will only look in the config directory, so we ignore path
             [h,f] = os.path.split( filename )
-            path = StatusItem.get_ini_data( only_section='DISPLAY', only_name='PROGRAM_PREFIX' )['data']['parameters'][0]['values']['value']
+            path = get_parameter(INI_FILE_CACHE, "DISPLAY", "PROGRAM_PREFIX")["values"]["value"]
+
             if( start ):
                 if ( ( not ovw ) and ( os.path.isfile( os.path.join( path, f ) ) ) ):
                     reply['data'] = 'occupied'
@@ -1800,8 +1800,9 @@ class CommandItem( object ):
             return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
     def shutdown_linuxcnc( self ):
+        global INI_FILE_CACHE
         try:
-            displayname = StatusItem.get_ini_data( only_section='DISPLAY', only_name='DISPLAY' )['data']['parameters'][0]['values']['value']
+            displayname = get_parameter(INI_FILE_CACHE, "DISPLAY", "DISPLAY")["values"]["value"]
             p = subprocess.Popen( ['pkill', displayname] , stderr=subprocess.STDOUT )
             return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
         except:
@@ -2717,6 +2718,7 @@ def main():
     global POCKETNC_DIRECTORY
     global INI_FILENAME
     global INI_FILE_PATH
+    global INI_FILE_CACHE
     global userdict
     global instance_number
     global LINUXCNCSTATUS
@@ -2748,6 +2750,8 @@ def main():
 
     if ( int(options.verbose) > 4):
         print "Parsing INI File Name"
+
+    INI_FILE_CACHE = read_ini_data(INI_FILENAME)
 
     instance_number = random()
     LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
