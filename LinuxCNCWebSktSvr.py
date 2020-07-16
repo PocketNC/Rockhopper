@@ -727,6 +727,22 @@ class StatusItem( object ):
       reply = { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":detected }
       return reply
 
+    def usb_software_files(self):
+      try:
+        files = []
+        # usbmount uses available dir with lowest number among /media/usb[0-7] as mount location
+        usbDirBase = "/media/usb"
+        usbDir = ""
+        for mountDirIdx in range(8):
+          usbDir = usbDirBase + str( mountDirIdx )
+          files = [ f for f in os.listdir(usbDir) if f.startswith("pocketnc") and f.endswith('.p') ]
+          if ( os.path.exists(usbDir) and len(files) > 0 ):
+            break
+      except Exception as e:
+        code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+        ret["data"] = e.message
+      return  { "code":LinuxCNCServerCommand.REPLY_COMMAND_OK, "data":files }
+
     def map_usb( self ):
       try:
         usbMap = { "detected" : False }
@@ -915,6 +931,8 @@ class StatusItem( object ):
                     ret = self.detect_usb()
                 elif (self.name == 'usb_map'):
                     ret = self.map_usb()
+                elif (self.name == 'usb_software_files'):
+                    ret = self.usb_software_files()
                 elif (self.name == 'halgraph'):
                     ret = self.get_halgraph()
                 elif (self.name == 'calibration_data'):
@@ -1083,6 +1101,7 @@ StatusItem( name='temperature_data',         coreLinuxCNCVariable=False, watchab
 StatusItem( name='ls',                       coreLinuxCNCVariable=False, watchable=True, valtype='string[]',help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.' ).register_in_dict( StatusItems )
 StatusItem( name='usb_detected',             coreLinuxCNCVariable=False, watchable=True, valtype='bool',help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media' ).register_in_dict( StatusItems )
 StatusItem( name='usb_map',                  coreLinuxCNCVariable=False, watchable=False, valtype='dict',help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]' ).register_in_dict( StatusItems )
+StatusItem( name='usb_software_files',       coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Return any files that match pocketnc*.p for updating the software via USB.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot',                 coreLinuxCNCVariable=False, watchable=False, valtype='string[]',help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='backplot_async',           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 StatusItem( name='config',                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',    help='Config (ini) file contents.', requiresLinuxCNCUp=False  ).register_in_dict( StatusItems )
@@ -1257,6 +1276,13 @@ class CommandItem( object ):
 
         return reply
 
+    def set_m6_tool_probe( self, commandDict ):
+      global CALIBRATION_OVERLAY_FILE
+      ini_data = read_ini_data(CALIBRATION_OVERLAY_FILE)
+      set_parameter(ini_data, "POCKETNC_FEATURES", "M6_TOOL_PROBE", int(commandDict['0']))
+      write_ini_data(ini_data, CALIBRATION_OVERLAY_FILE)
+      return self.restart_linuxcnc_and_rockhopper()
+      
     # called in a "put_config" command to write INI data to INI file, completely re-writing the file
     def put_ini_data( self, commandDict ):
         global INI_FILENAME
@@ -1396,8 +1422,6 @@ class CommandItem( object ):
         return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_ncfiles' }
 
     def check_for_updates(self, commandDict):
-        global POCKETNC_DIRECTORY
-
         try:
            subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch'], cwd=POCKETNC_DIRECTORY)
            subprocess.call(['git', 'fetch', '--tags'], cwd=POCKETNC_DIRECTORY)
@@ -1663,6 +1687,41 @@ class CommandItem( object ):
         
         return reply 
 
+    def check_usb_file_for_updates(self, file, require_valid_signature):
+      try:
+	if os.path.exists("/tmp/pocketnc.tar.gz"):
+	  os.remove("/tmp/pocketnc.tar.gz")
+      except:
+	return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Error removing existing /tmp/pocketnc.tar.gz" }
+      try:
+	shutil.rmtree("/tmp/pocketnc", ignore_errors=True)
+      except:
+	return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Error removing existing /tmp/pocketnc folder" }
+
+      try:
+	gpgOutput = subprocess.check_output(['gpg', '--status-fd', '1', '--output', '/tmp/pocketnc.tar.gz', '--decrypt', '/media/usb0/%s' % file], cwd=POCKETNC_DIRECTORY);
+	gpgReturnStatus = 0
+      except subprocess.CalledProcessError as e:
+	gpgOutput = ""
+	gpgReturnStatus = e.returncode
+
+      if require_valid_signature and "VALIDSIG" not in gpgOutput:
+	return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Invalid signature" }
+
+      try:
+	subprocess.call(['tar', 'xzf', '/tmp/pocketnc.tar.gz', '--directory', '/tmp']);
+	subprocess.call(['git', 'submodule', 'foreach', 'git', 'fetch', 'tmp'], cwd=POCKETNC_DIRECTORY)
+	subprocess.call(['git', 'fetch', 'tmp', '--tags'], cwd=POCKETNC_DIRECTORY)
+	subprocess.call(['git', 'fetch', '--prune', 'tmp', '+refs/tags/*:refs/tags/*'], cwd=POCKETNC_DIRECTORY)
+	all_versions = subprocess.check_output(['git', 'tag', '-l'], cwd=POCKETNC_DIRECTORY).split()
+	all_versions.sort(key=natural_keys)
+	subprocess.call(['rm', '-rf', '/tmp/pocketnc']);
+	subprocess.call(['rm', '/tmp/pocketnc.tar.gz']);
+      except:
+	  return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Exception during usb software check" }
+
+      return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions, 'id': 'check_usb_file_for_updates' }
+
     # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it.
     # The mountSlot is an integer corresponding to one of the 8 usbmount directories ('/media/usb[0,8)')
     def eject_usb( self ):
@@ -1896,6 +1955,10 @@ class CommandItem( object ):
                     reply = self.reset_run_time_clock()
                 elif (self.name == 'eject_usb'):
                     reply = self.eject_usb()
+		elif (self.name == 'check_usb_file_for_updates'):
+		    reply = self.check_usb_file_for_updates(passed_command_dict['0'], passed_command_dict['1']);
+                elif (self.name == 'set_m6_tool_probe'):
+                    reply = self.set_m6_tool_probe(passed_command_dict)
                 else:
                     reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
                 return reply
@@ -1915,7 +1978,9 @@ CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='check_usb_file_for_updates', isasync=True, paramTypes=[ { 'pname': 'file', 'ptype': 'string', 'optional': False }, { 'pname': 'require_valid_signature', 'ptype': 'bool', 'optional': False } ], help="Check file on USB for updates.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='set_m6_tool_probe',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ], help="Set m6_tool_probe on/off.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
 # Pre-defined Command Items
 CommandItem( name='abort',                   paramTypes=[],      help='send EMC_TASK_ABORT message' ).register_in_dict( CommandItems )
