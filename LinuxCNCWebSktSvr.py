@@ -992,6 +992,8 @@ class StatusItemEncoder(json.JSONEncoder):
             return obj.to_json_compatible_form()
         if isinstance(obj, CommandItem):
             return { "name":obj.name, "paramTypes":obj.paramTypes, "help":obj.help }
+	if isinstance(obj, machinekit.hal.Pin):
+	  return None
         return json.JSONEncoder.default(self, obj)
 
 
