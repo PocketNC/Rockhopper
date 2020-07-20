@@ -2321,6 +2321,11 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
             addresses8000 = ["http://%s:8000" % (i['addr']) for i in ifaddresses(ifaceName).setdefault(AF_INET, [{'addr':'No IP addr'}] )]
             if origin in addresses or origin in addresses8000:
                 return True
+
+        # allow connections from local development server when in dev mode
+	if os.environ.get('DEV') == 'true':
+	  if origin.startswith("http://localhost"):
+	    return True
         
         return True if originRE.match(origin) else False
     
