@@ -2163,6 +2163,8 @@ class LinuxCNCServerCommand( object ):
             self.replyval['code'] = LinuxCNCServerCommand.REPLY_NAK
         if ('data' not in self.replyval):
                 self.replyval['data'] = self.replyval['code']
+	if('meta' not in self.replyval and 'meta' in self.commandDict):
+	  self.replyval['meta'] = self.commandDict['meta']
         val = json.dumps( self.replyval, cls=StatusItemEncoder )
         return val
 
