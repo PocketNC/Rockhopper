@@ -2178,11 +2178,21 @@ class LinuxCNCServerCommand( object ):
                 self.linuxcnc_status_poller.del_observer( self.on_new_poll )
                 return
             newval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
-            if (self.replyval['data'] != newval['data']):
-                self.replyval = newval
-                self.server_command_handler.send_message( self.form_reply() )
-                if ( newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK ):
-                    self.linuxcnc_status_poller.del_observer( self.on_new_poll )
+	    isDifferent = False
+	    if self.statusitem.name == "actual_position":
+	      maxDiff = 0
+	      for (old,new) in zip(self.replyval['data'], newval['data']):
+		diff = abs(old-new)
+		if diff > maxDiff:
+		  maxDiff = diff
+	      isDifferent = True if maxDiff > .000001 else False
+            else:
+	      isDifferent = self.replyval['data'] != newval['data']
+	    if isDifferent:
+		self.replyval = newval
+		self.server_command_handler.send_message( self.form_reply() )
+		if ( newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK ):
+		    self.linuxcnc_status_poller.del_observer( self.on_new_poll )
         except:
             pass
 
