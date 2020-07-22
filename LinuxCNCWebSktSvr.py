@@ -18,6 +18,7 @@
 # Copyright 2020 Pocket NC, Inc.
 #
 
+import traceback
 import sys
 import os
 import linuxcnc
@@ -49,6 +50,10 @@ from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
 from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
+
+#import cProfile
+#import pstats
+#pr = cProfile.Profile()
 
 DEV = os.environ.get('DEV') == 'true'
 if DEV:
@@ -86,6 +91,7 @@ def natural_keys(text):
   return [ toIntOrString(c) for c in re.split('[v.-]', text) ]
     
 UpdateStatusPollPeriodInMilliSeconds = 50
+UpdateLowPriorityStatusPollPeriodInMilliSeconds = 2000
 UpdateErrorPollPeriodInMilliseconds = 50
 
 eps = float(0.000001)
@@ -158,13 +164,18 @@ class LinuxCNCStatusPoller(object):
     # begin the poll-update loop of the linuxcnc system
     self.scheduler = tornado.ioloop.PeriodicCallback( self.poll_update, period, io_loop=main_loop )
     self.scheduler.start()
+
+    # begin the low priority poll-update loop of the linuxcnc system
+    self.scheduler_low_priority = tornado.ioloop.PeriodicCallback( self.poll_update_low_priority, UpdateLowPriorityStatusPollPeriodInMilliSeconds, io_loop=main_loop )
+    self.scheduler_low_priority.start()
     
     # begin the poll_update_errors loop of the linuxcnc system
     self.scheduler_errors = tornado.ioloop.PeriodicCallback( self.poll_update_errors, UpdateErrorPollPeriodInMilliseconds, io_loop=main_loop )
     self.scheduler_errors.start()
-    
+
     # register listeners
     self.observers = []
+    self.observers_low_priority = []
     hss_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'HIGH_SPEED_SPINDLE')
     self.is_hss = hss_ini_data is not None and hss_ini_data['values']['value'] == '1'
     if self.is_hss:
@@ -226,6 +237,12 @@ class LinuxCNCStatusPoller(object):
     self.sig_dict = {}
     
     self.counter = 0
+
+  def add_observer_low_priority(self, callback):
+    self.observers_low_priority.append(callback)
+
+  def del_observer_low_priority(self, callback):
+    self.observers_low_priority.remove(callback)
 
   def add_observer(self, callback):
     self.observers.append(callback)
@@ -351,6 +368,14 @@ class LinuxCNCStatusPoller(object):
     except Exception as e:
       logger.error("Exception during poll_update_errors: %s" % (e,))
 
+  def poll_update_low_priority(self):
+    for observer in self.observers_low_priority:
+      try:
+        observer()
+      except Exception as ex:
+        logger.error("error in observer: %s" % traceback.format_exc())
+        self.del_observer_low_priority(observer)
+
   def poll_update(self):
     global linuxcnc_command
 
@@ -374,6 +399,7 @@ class LinuxCNCStatusPoller(object):
       try:
         observer()
       except Exception as ex:
+        logger.error("error in observer: %s" % traceback.format_exc())
         self.del_observer(observer)
 
 
@@ -383,10 +409,24 @@ class LinuxCNCStatusPoller(object):
 LINUXCNCSTATUS = None
 
 # *****************************************************
+# Functions for determining inequality for StatusItems
+# *****************************************************
+def isNotEqual(a,b):
+  return a != b
+
+def isIteratorOfFloatsNotEqual(a,b):
+  for (old,new) in zip(a,b):
+    diff = abs(old-new)
+    if diff > .000001:
+      return True
+
+  return False
+
+# *****************************************************
 # Class to track an individual status item
 # *****************************************************
 class StatusItem( object ):
-  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isAsync=False ):
+  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isAsync=False, isDifferent=isNotEqual, lowPriority=False ):
     self.name = name
     self.valtype = valtype
     self.help = help
@@ -396,6 +436,8 @@ class StatusItem( object ):
     self.coreLinuxCNCVariable = coreLinuxCNCVariable
     self.isasync = isAsync
     self.halBinding = None
+    self.isDifferent = isDifferent
+    self.lowPriority = lowPriority
 
 
   @staticmethod
@@ -414,7 +456,16 @@ class StatusItem( object ):
     dictionary[ self.name ] = self
 
   def to_json_compatible_form( self ):
-    return self.__dict__
+    return {
+      "name": self.name,
+      "valtype": self.valtype,
+      "help": self.help,
+      "isarray": self.isarray,
+      "watchable": self.watchable,
+      "coreLinuxCNCVariable": self.coreLinuxCNCVariable,
+      "isasync": self.isasync,
+      "lowPriority": self.lowPriority
+    }
 
   def backplot_async( self, async_buffer, async_lock, linuxcnc_status_poller ):
     global lastBackplotFilename
@@ -548,26 +599,6 @@ class StatusItem( object ):
 
     return reply
 
-  @staticmethod
-  def check_hal_file_listed_in_ini( filename ):
-    # check this is a valid hal file name
-    f = filename
-    found = False
-    halfiles = StatusItem.get_ini_data( only_section='HAL', only_name='HALFILE' )
-    halfiles = halfiles['data']['parameters']
-    for v in halfiles:
-      if (v['values']['value'] == f):
-        found = True
-        break
-    if not found:
-      halfiles = StatusItem.get_ini_data( only_section='HAL', only_name='POSTGUI_HALFILE' )
-      halfiles = halfiles['data']['parameters']
-      for v in halfiles:
-        if (v['values']['value'] == f):
-          found = True
-          break
-    return found
-
   def get_compensation( self ):
     reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
@@ -612,46 +643,7 @@ class StatusItem( object ):
 
   def get_client_config( self ):
     reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
-    reply['data'] = '{}'
-
-    try:
-      fo = open( CONFIG_FILENAME, 'r' )
-      reply['data'] = fo.read()
-    except:
-      reply['data'] = '{}'
-    finally:
-      try:
-        fo.close()
-      except:
-        pass
-    return reply
-
-
-  def get_hal_file( self, filename ): 
-    try:
-      reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
-      # strip off just the filename, if a path was given
-      # we will only look in the config directory, so we ignore path
-      [h,f] = os.path.split( filename )
-      if not StatusItem.check_hal_file_listed_in_ini( f ):
-        reply['code']= LinuxCNCServerCommand.REPLY_ERROR_INVALID_PARAMETER
-        return reply
-
-      reply['data'] = ''
-
-      try:
-        fo = open( os.path.join( INI_FILE_PATH, f ), 'r' )
-        reply['data'] = fo.read()
-      except:
-        reply['data'] = ''
-      finally:
-        try:
-          fo.close()
-        except:
-          pass
-    except Exception as ex:
-      reply['data'] = ''
-      reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
+    reply['data'] = CLIENT_CONFIG_DATA
 
     return reply
 
@@ -672,20 +664,9 @@ class StatusItem( object ):
 
     return { "code": LinuxCNCServerCommand.REPLY_COMMAND_OK, "data": all_versions }
 
-  def list_gcode_files( self, directory ):
-    file_list = []
+  def list_gcode_files( self ):
     code = LinuxCNCServerCommand.REPLY_COMMAND_OK
-    try:
-      if directory is None:
-        directory = "."
-        directory = get_parameter(INI_FILE_CACHE, 'DISPLAY', 'PROGRAM_PREFIX' )['values']['value']
-    except:
-      pass
-    try:
-      file_list = glob.glob(  os.path.join(directory,'*.[nN][gG][cC]') )
-    except:
-      code = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-    return { "code":code, "data":file_list, "directory":directory }
+    return { "code":code, "data": GCODE_FILES }
 
   def detect_usb( self ):
     detected = False
@@ -894,7 +875,7 @@ class StatusItem( object ):
         elif (self.name == 'current_version'):
           ret = self.get_current_version()
         elif (self.name == 'ls'):
-          ret = self.list_gcode_files( command_dict.get("directory", None) )
+          ret = self.list_gcode_files()
         elif (self.name == 'usb_detected'):
           ret = self.detect_usb()
         elif (self.name == 'usb_map'):
@@ -913,8 +894,6 @@ class StatusItem( object ):
           ret = StatusItem.get_overlay_data()
         elif (self.name == 'config_item'):
           ret = StatusItem.get_ini_data_item(command_dict.get("section", ''),command_dict.get("parameter", ''))
-        elif (self.name == 'halfile'):
-          ret = self.get_hal_file( command_dict.get("filename", '') )
         elif (self.name == 'client_config'):
           ret = self.get_client_config()
         elif (self.name == 'compensation'):
@@ -944,6 +923,7 @@ class StatusItem( object ):
           ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
 
     except Exception as ex :
+      logger.error("Exception in get_cur_status_value: %s" % traceback.format_exc())
       ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
       ret['data'] = ''
 
@@ -960,11 +940,7 @@ class StatusItemEncoder(json.JSONEncoder):
       return obj.to_json_compatible_form()
     if isinstance(obj, CommandItem):
       return { "name":obj.name, "paramTypes":obj.paramTypes, "help":obj.help }
-    if isinstance(obj, machinekit.hal.Pin):
-      return None
     return json.JSONEncoder.default(self, obj)
-
-
 
 # *****************************************************
 # Global list of possible status items from linuxcnc
@@ -972,7 +948,7 @@ class StatusItemEncoder(json.JSONEncoder):
 StatusItems = {}
 StatusItem( name='acceleration',             watchable=True, valtype='float',   help='Default acceleration.  Reflects INI file value [TRAJ]DEFAULT_ACCELERATION' ).register_in_dict( StatusItems )
 StatusItem( name='active_queue',             watchable=True, valtype='int'  ,   help='Number of motions blending' ).register_in_dict( StatusItems )
-StatusItem( name='actual_position',          watchable=True, valtype='float[]', help='Current trajectory position. Array of floats: (x y z a b c u v w). In machine units.' ).register_in_dict( StatusItems )
+StatusItem( name='actual_position',          watchable=True, valtype='float[]', help='Current trajectory position. Array of floats: (x y z a b c u v w). In machine units.', isDifferent=isIteratorOfFloatsNotEqual ).register_in_dict( StatusItems )
 StatusItem( name='adaptive_feed_enabled',    watchable=True, valtype='int',     help='status of adaptive feedrate override' ).register_in_dict( StatusItems )
 StatusItem( name='ain',                      watchable=True, valtype='float[]', help='current value of the analog input pins' ).register_in_dict( StatusItems )
 StatusItem( name='angular_units',            watchable=True, valtype='string' , help='From [TRAJ]ANGULAR_UNITS ini value' ).register_in_dict( StatusItems )
@@ -1050,11 +1026,11 @@ StatusItem( name='task_paused',              watchable=True, valtype='int' ,    
 StatusItem( name='task_state',               watchable=True, valtype='int' ,    help='Current task state. one of STATE_ESTOP=1, STATE_ESTOP_RESET=2, STATE_ON=4, STATE_OFF=3' ).register_in_dict( StatusItems )
 StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    help='current tool number' ).register_in_dict( StatusItems )
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
+StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', lowPriority=True ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
 # Array Status items
-StatusItem( name='axis',                     watchable=True, valtype='dict' ,   help='Axis Dictionary', isarray=True, arraylen=axis_length ).register_in_dict( StatusItems )
-StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', isarray=True, arraylen=tool_table_length ).register_in_dict( StatusItems )
+StatusItem( name='axis',                     watchable=False, valtype='dict' ,   help='Axis Dictionary' ).register_in_dict( StatusItems )
 
 # Not currently used, by may be implemented in the future
 #StatusItem( name='backplot',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
@@ -1072,26 +1048,25 @@ StatusItem( name='current_version',                              coreLinuxCNCVar
 StatusItem( name='dogtag',                                       coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='dogtag'                                                                                                                                                          ).register_in_dict( StatusItems )
 StatusItem( name='error',                                        coreLinuxCNCVariable=False, watchable=True,  valtype='dict',     help='Error queue.'                                                                                                                                                    ).register_in_dict( StatusItems )
 StatusItem( name='file_content',                                 coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='currently executing gcode file contents'                                                                                                                         ).register_in_dict( StatusItems )
-StatusItem( name='halfile',                                      coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Contents of a hal file.  Pass in filename=??? to specify the hal file name'                                                                                      ).register_in_dict( StatusItems )
 StatusItem( name='halgraph',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"'                                            ).register_in_dict( StatusItems )
 StatusItem( name='halpin_halui.max-velocity.value',              coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='maxvelocity'                                                                                                                                                     ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.pressure',                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Pressure in MPa as read by MPRLS.'                                                                                                                               ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.temperature',               coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Temperature in C as read by MCP9808'                                                                                                                             ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.full_warmup_needed',         coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.'                                                                                                   ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.performing_warmup',          coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates the high speed spindle warm up is in process.'                                                                                               ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.warmup_needed',              coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.'                                                                                                   ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.pressure',                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Pressure in MPa as read by MPRLS.', lowPriority=True                                                                                                             ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.temperature',               coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Temperature in C as read by MCP9808', lowPriority=True                                                                                                           ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.full_warmup_needed',         coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True                                                                                 ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.performing_warmup',          coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates the high speed spindle warm up is in process.', lowPriority=True                                                                             ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.warmup_needed',              coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True                                                                                 ).register_in_dict( StatusItems )
 StatusItem( name='halpin_spindle_voltage.speed_measured',        coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Measured spindle speed using clock pin'                                                                                                                          ).register_in_dict( StatusItems )
 StatusItem( name='halsig_interlockClosed',                       coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Monitors status of interlock. Also true if not equipped with interlock.'                                                                                         ).register_in_dict( StatusItems )
 StatusItem( name='halpin_interlock.program-paused-by-interlock', coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.' ).register_in_dict( StatusItems )
 StatusItem( name='ini_file_name',                                coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='INI file to use for next LinuxCNC start.'                                                                                                                        ).register_in_dict( StatusItems )
-StatusItem( name='ls',                                           coreLinuxCNCVariable=False, watchable=True,  valtype='string[]', help='Get a list of gcode files.  Optionally specify directory with "directory":"string", or default directory will be used.  Only *.ngc files will be listed.'        ).register_in_dict( StatusItems )
-StatusItem( name='pressure_data',                                coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Pressure data history, back as far as one hour'                                                                                                                  ).register_in_dict( StatusItems )
+StatusItem( name='ls',                                           coreLinuxCNCVariable=False, watchable=True,  valtype='string[]', help='Get a list of gcode (*.ngc) files in the [DISPLAY]PROGRAM_PREFIX directory.'                                                                                     ).register_in_dict( StatusItems )
+StatusItem( name='pressure_data',                                coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Pressure data history, back as far as one hour', lowPriority=True                                                                                                ).register_in_dict( StatusItems )
 StatusItem( name='rotary_motion_only',                           coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='True if any rotational axis is in motion but not any linear axis.'                                                                                               ).register_in_dict( StatusItems ) 
 StatusItem( name='rtc_seconds',                                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Run time of current cycle in seconds'                                                                                                                            ).register_in_dict( StatusItems )
 StatusItem( name='running',                                      coreLinuxCNCVariable=False, watchable=True,  valtype='int',      help='True if linuxcnc is up and running.'                                                                                                                             ).register_in_dict( StatusItems )
 StatusItem( name='system_status',                                coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='System status information, such as IP addresses, disk usage, etc.'                                                                                               ).register_in_dict( StatusItems )
-StatusItem( name='temperature_data',                             coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Temperature data history, back as far as one hour. Key is timestamp.'                                                                                            ).register_in_dict( StatusItems )
-StatusItem( name='usb_detected',                                 coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media'                                                                          ).register_in_dict( StatusItems )
+StatusItem( name='temperature_data',                             coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Temperature data history, back as far as one hour. Key is timestamp.', lowPriority=True                                                                          ).register_in_dict( StatusItems )
+StatusItem( name='usb_detected',                                 coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media', lowPriority=True                                                        ).register_in_dict( StatusItems )
 StatusItem( name='usb_map',                                      coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]'                                        ).register_in_dict( StatusItems )
 StatusItem( name='usb_software_files',                           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Return any files that match pocketnc*.p for updating the software via USB.'                                                                                      ).register_in_dict( StatusItems )
 StatusItem( name='users',                                        coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Web server user list.'                                                                                                                                           ).register_in_dict( StatusItems )
@@ -1419,23 +1394,20 @@ class CommandItem( object ):
     return reply
 
   def put_client_config( self, key, value ):
+    global CLIENT_CONFIG_DATA
+
     reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
 
     try:
-      fo = open( CONFIG_FILENAME, 'r' )
-      jsonobj = json.loads( fo.read() )
+      jsonobj = json.loads( CLIENT_CONFIG_DATA )
       jsonobj[key] = value
     except:
       jsonobj = {}
-    finally:
-      try:
-        fo.close()
-      except:
-        pass
   
     try:    
+      CLIENT_CONFIG_DATA = json.dumps(jsonobj)
       fo = open( CONFIG_FILENAME, 'w' )
-      fo.write( json.dumps(jsonobj) )
+      fo.write( CLIENT_CONFIG_DATA )
     except:
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     finally:
@@ -1487,6 +1459,12 @@ class CommandItem( object ):
     
     return '\n'.join(lines)
 
+  def update_gcode_files(self):
+    global GCODE_FILES
+    try:
+      GCODE_FILES = glob.glob(  os.path.join(GCODE_DIRECTORY,'*.[nN][gG][cC]') )
+    except:
+      GCODE_FILES = []
 
   def put_gcode_file( self, filename, data ):
     reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
@@ -1550,6 +1528,7 @@ class CommandItem( object ):
             pass
         os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), os.path.join( path, f))
         uploadingFile.close()
+        self.update_gcode_files()
         linuxcnc_command.program_open( os.path.join( path, f ) ) 
    
     except Exception as ex:
@@ -1591,33 +1570,6 @@ class CommandItem( object ):
     except Exception as ex:
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
-    return reply 
-
-
-  # writes the specified HAL file to disk
-  def put_hal_file( self, filename, data ):
-    reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
-    try:
-      # strip off just the filename, if a path was given
-      # we will only look in the config directory, so we ignore path
-      [h,f] = os.path.split( filename )
-      if not StatusItem.check_hal_file_listed_in_ini( f ):
-        reply['code']=LinuxCNCServerCommand.REPLY_ERROR_INVALID_PARAMETER
-        return reply
-
-      try:
-        fo = open( os.path.join( INI_FILE_PATH, f ), 'w' )
-        fo.write(data)
-      except:
-        reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-      finally:
-        try:
-          fo.close()
-        except:
-          reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-    except Exception as ex: 
-      reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-    
     return reply 
 
   def check_usb_file_for_updates(self, file, require_valid_signature):
@@ -1821,8 +1773,6 @@ class CommandItem( object ):
           reply = self.temp_set_ini_data(passed_command_dict, linuxcnc_status_poller)
         elif (self.name == 'clear_error'):
           lastLCNCerror = ""
-        elif (self.name == 'halfile'):
-          reply = self.put_hal_file( filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict.get['1']) )
         elif (self.name == 'shutdown'):
           reply = self.shutdown_linuxcnc()
         elif (self.name == 'shutdown_computer'):
@@ -1833,6 +1783,7 @@ class CommandItem( object ):
           reply = self.interlock_release() 
         elif (self.name == 'program_upload'):
           reply = self.put_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']))
+          self.update_gcode_files()
         elif (self.name == 'program_upload_chunk'):
           reply = self.put_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']), start=passed_command_dict.get('start', passed_command_dict['2']), end=passed_command_dict.get('end', passed_command_dict['3']), ovw=passed_command_dict.get('ovw', passed_command_dict['4']) )
         elif (self.name == 'program_download_chunk'):
@@ -1875,6 +1826,14 @@ class CommandItem( object ):
           reply = self.check_usb_file_for_updates(passed_command_dict['0'], passed_command_dict['1'])
         elif (self.name == 'set_m6_tool_probe'):
           reply = self.set_m6_tool_probe(passed_command_dict)
+#        elif self.name == 'profile_start':
+#          logger.debug("starting profiling...")
+#          pr.enable()
+#        elif self.name == 'profile_end':
+#          pr.disable()
+#          logger.debug("disabled profiling.")
+#          p = pstats.Stats(pr)
+#          p.sort_stats('tottime').print_stats()
         else:
           reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         return reply
@@ -1938,7 +1897,6 @@ CommandItem( name='delete_swap', isasync=False, paramTypes=[], help='Delete an e
 CommandItem( name='disable_swap', isasync=False, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='enable_swap', isasync=False, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='halfile',                 paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ],       help='Overwrite the specified file.  Parameter is a filename, then a string containing the new hal file contents.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload_chunk',    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_download_chunk',  paramTypes=[ {'pname':'idx', 'ptype':'int', 'optional':False}, {'pname':'size', 'ptype':'int', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Send a chunk of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
@@ -1958,6 +1916,9 @@ CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdow
 CommandItem( name='shutdown_computer',                paramTypes=[ ],       help='Shutdown the computer.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Temporarily set a single INI config item so that the change takes effect in linuxcnc, but is not saved to the INI file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+
+#CommandItem( name='profile_start',           paramTypes=[], command_type=CommandItem.SYSTEM, help='Start profiling' ).register_in_dict( CommandItems )
+#CommandItem( name='profile_end',             paramTypes=[], command_type=CommandItem.SYSTEM, help='End profiling' ).register_in_dict( CommandItems )
 
 # *****************************************************
 # HAL Interface
@@ -2046,6 +2007,25 @@ class LinuxCNCServerCommand( object ):
     val = json.dumps( self.replyval, cls=StatusItemEncoder )
     return val
 
+  def on_new_poll_low_priority(self):
+    try:
+      if (not self.statusitem.watchable):
+        self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+        return
+      if self.server_command_handler.isclosed:
+        self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+        return
+
+      newval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
+      if self.statusitem.isDifferent(self.replyval['data'], newval['data']):
+        self.replyval = newval
+        self.server_command_handler.send_message( self.form_reply() )
+        if newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK:
+          self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+
+    except:
+      pass
+
   # update on a watched variable 
   def on_new_poll( self ):
     try:
@@ -2058,21 +2038,12 @@ class LinuxCNCServerCommand( object ):
 
       newval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
 
-      isDifferent = False
-      if self.statusitem.name == "actual_position":
-        maxDiff = 0
-        for (old,new) in zip(self.replyval['data'], newval['data']):
-          diff = abs(old-new)
-          if diff > maxDiff:
-            maxDiff = diff
-        isDifferent = True if maxDiff > .000001 else False
-      else:
-        isDifferent = self.replyval['data'] != newval['data']
-      if isDifferent:
+      if self.statusitem.isDifferent(self.replyval['data'], newval['data']):
         self.replyval = newval
         self.server_command_handler.send_message( self.form_reply() )
         if newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK:
           self.linuxcnc_status_poller.del_observer( self.on_new_poll )
+
     except:
       pass
 
@@ -2128,8 +2099,12 @@ class LinuxCNCServerCommand( object ):
             self.replyval['index'] = self.item_index
           self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
           if self.replyval['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK:
-            self.linuxcnc_status_poller.add_observer( self.on_new_poll )
+            if self.statusitem.lowPriority:
+              self.linuxcnc_status_poller.add_observer_low_priority( self.on_new_poll_low_priority )
+            else:
+              self.linuxcnc_status_poller.add_observer( self.on_new_poll )
       except:
+        logger.error("error in watch: %s" % traceback.format_exc())
         self.replyval['code'] = LinuxCNCServerCommand.REPLY_NAK
     elif self.command == 'list_get':
       try:
@@ -2458,6 +2433,9 @@ def main():
   global INI_FILE_CACHE
   global LINUXCNCSTATUS
   global options
+  global CLIENT_CONFIG_DATA
+  global GCODE_FILES
+  global GCODE_DIRECTORY
 
   def fn():
     logger.debug("Webserver reloading...")
@@ -2487,6 +2465,15 @@ def main():
   INI_FILE_CACHE = read_ini_data(INI_FILENAME)
 
   LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
+
+  with open( CONFIG_FILENAME, 'r' ) as fh:
+    CLIENT_CONFIG_DATA = fh.read()
+
+  GCODE_DIRECTORY = get_parameter(INI_FILE_CACHE, 'DISPLAY', 'PROGRAM_PREFIX' )['values']['value']
+  try:
+    GCODE_FILES = glob.glob(  os.path.join(GCODE_DIRECTORY,'*.[nN][gG][cC]') )
+  except:
+    GCODE_FILES = []
 
   log_exists = os.path.isfile("/var/log/linuxcnc_webserver.log")
   if not log_exists:
