@@ -369,6 +369,10 @@ class LinuxCNCStatusPoller(object):
       logger.error("Exception during poll_update_errors: %s" % (e,))
 
   def poll_update_low_priority(self):
+    update_gcode_files() # update gcode files to catch case where
+                         # someone adds or deletes files through
+                         # other means than Rockhopper (i.e. through 
+                         # the terminal, ssh, etc.)
     for observer in self.observers_low_priority:
       try:
         observer()
@@ -421,6 +425,18 @@ def isIteratorOfFloatsNotEqual(a,b):
       return True
 
   return False
+
+def get_gcode_files( directory ):
+  try:
+    return glob.glob(  os.path.join(directory,'*.[nN][gG][cC]') )
+  except:
+    return []
+
+def update_gcode_files():
+  global GCODE_FILES
+
+  GCODE_FILES = get_gcode_files(GCODE_DIRECTORY)
+
 
 # *****************************************************
 # Class to track an individual status item
@@ -917,7 +933,7 @@ class StatusItem( object ):
           ret['data'] = temperatureData[:]
       else:
         # Variables that use the LinuxCNC status poller
-        if (self.isarray):
+        if self.isarray and command_dict.get("index", None) != None:
           ret['data'] = (linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name ))[item_index]
         else:
           ret['data'] = linuxcnc_status_poller.linuxcnc_status.__getattribute__( self.name )
@@ -1026,7 +1042,7 @@ StatusItem( name='task_paused',              watchable=True, valtype='int' ,    
 StatusItem( name='task_state',               watchable=True, valtype='int' ,    help='Current task state. one of STATE_ESTOP=1, STATE_ESTOP_RESET=2, STATE_ON=4, STATE_OFF=3' ).register_in_dict( StatusItems )
 StatusItem( name='tool_in_spindle',          watchable=True, valtype='int' ,    help='current tool number' ).register_in_dict( StatusItems )
 StatusItem( name='tool_offset',              watchable=True, valtype='float' ,  help='offset values of the current tool' ).register_in_dict( StatusItems )
-StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', lowPriority=True ).register_in_dict( StatusItems )
+StatusItem( name='tool_table',               watchable=True, valtype='float[]', help='list of tool entries. Each entry is a sequence of the following fields: id, xoffset, yoffset, zoffset, aoffset, boffset, coffset, uoffset, voffset, woffset, diameter, frontangle, backangle, orientation', lowPriority=True, isarray=True, arraylen=tool_table_length  ).register_in_dict( StatusItems )
 StatusItem( name='velocity',                 watchable=True, valtype='float' ,  help='default velocity, float. reflects [TRAJ]DEFAULT_VELOCITY' ).register_in_dict( StatusItems )
 
 # Array Status items
@@ -1459,13 +1475,6 @@ class CommandItem( object ):
     
     return '\n'.join(lines)
 
-  def update_gcode_files(self):
-    global GCODE_FILES
-    try:
-      GCODE_FILES = glob.glob(  os.path.join(GCODE_DIRECTORY,'*.[nN][gG][cC]') )
-    except:
-      GCODE_FILES = []
-
   def put_gcode_file( self, filename, data ):
     reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
     try:
@@ -1528,7 +1537,7 @@ class CommandItem( object ):
             pass
         os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), os.path.join( path, f))
         uploadingFile.close()
-        self.update_gcode_files()
+        update_gcode_files()
         linuxcnc_command.program_open( os.path.join( path, f ) ) 
    
     except Exception as ex:
@@ -1783,7 +1792,7 @@ class CommandItem( object ):
           reply = self.interlock_release() 
         elif (self.name == 'program_upload'):
           reply = self.put_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']))
-          self.update_gcode_files()
+          update_gcode_files()
         elif (self.name == 'program_upload_chunk'):
           reply = self.put_chunk_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), data=passed_command_dict.get('data', passed_command_dict['1']), start=passed_command_dict.get('start', passed_command_dict['2']), end=passed_command_dict.get('end', passed_command_dict['3']), ovw=passed_command_dict.get('ovw', passed_command_dict['4']) )
         elif (self.name == 'program_download_chunk'):
@@ -1792,6 +1801,7 @@ class CommandItem( object ):
           reply = self.get_gcode_file_size(linuxcnc_status_poller=linuxcnc_status_poller) 
         elif (self.name == 'program_delete'):
           reply = self.del_gcode_file(filename=passed_command_dict.get('filename',passed_command_dict['0']).strip(), linuxcnc_status_poller=linuxcnc_status_poller)
+          update_gcode_files()
         elif (self.name == 'save_client_config'):
           reply = self.put_client_config( (passed_command_dict.get('key', passed_command_dict.get('0'))), (passed_command_dict.get('value', passed_command_dict.get('1'))) )
         elif (self.name == 'set_compensation'):
@@ -2094,7 +2104,7 @@ class LinuxCNCServerCommand( object ):
         if self.statusitem is None:
           self.replyval['code'] = LinuxCNCServerCommand.REPLY_STATUS_NOT_FOUND
         else:
-          if self.statusitem.isarray:
+          if self.statusitem.isarray and self.commandDict.get('index', None) != None:
             self.item_index = self.commandDict['index']
             self.replyval['index'] = self.item_index
           self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
@@ -2434,8 +2444,8 @@ def main():
   global LINUXCNCSTATUS
   global options
   global CLIENT_CONFIG_DATA
-  global GCODE_FILES
   global GCODE_DIRECTORY
+  global GCODE_FILES
 
   def fn():
     logger.debug("Webserver reloading...")
@@ -2470,10 +2480,7 @@ def main():
     CLIENT_CONFIG_DATA = fh.read()
 
   GCODE_DIRECTORY = get_parameter(INI_FILE_CACHE, 'DISPLAY', 'PROGRAM_PREFIX' )['values']['value']
-  try:
-    GCODE_FILES = glob.glob(  os.path.join(GCODE_DIRECTORY,'*.[nN][gG][cC]') )
-  except:
-    GCODE_FILES = []
+  GCODE_FILES = get_gcode_files(GCODE_DIRECTORY)
 
   log_exists = os.path.isfile("/var/log/linuxcnc_webserver.log")
   if not log_exists:
