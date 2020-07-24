@@ -1096,8 +1096,9 @@ class CommandItem( object ):
   MOTION=0
   HAL=1
   SYSTEM=2
+  METHOD=3
   
-  def __init__( self, name=None, paramTypes=[], help='', command_type=MOTION, isasync=False ):
+  def __init__( self, name=None, paramTypes=[], help='', command_type=MOTION, isasync=False, method=None ):
     self.name = name
     self.paramTypes = paramTypes
     self.help = help
@@ -1105,10 +1106,55 @@ class CommandItem( object ):
         paramTypes[idx]['ordinal'] = str(idx)
     self.type = command_type
     self.isasync = isasync
+    if command_type == CommandItem.METHOD:
+      if method == None:
+        if hasattr(self, name) and callable(getattr(self, name)):
+          method = name
+
+      if method != None:
+        self.method = getattr(self,method)
 
   # puts this object into the dictionary, with the key == self.name
   def register_in_dict( self, dictionary ):
     dictionary[ self.name ] = self
+
+  def jog_cmd(self, *args):
+    s = LINUXCNCSTATUS.linuxcnc_status
+    c = linuxcnc_command
+    s.poll()
+
+    if s.task_mode != linuxcnc.MODE_MANUAL:
+      c.mode(linuxcnc.MODE_MANUAL)
+      c.wait_complete()
+
+    c.jog(*args)
+
+  def mdi_cmd(self, *args):
+    s = LINUXCNCSTATUS.linuxcnc_status
+    c = linuxcnc_command
+    s.poll()
+
+    if s.task_mode != linuxcnc.MODE_MDI:
+      c.mode(linuxcnc.MODE_MDI)
+      c.wait_complete()
+
+    c.mdi(*args)
+
+  def program_open_cmd(self, *args):
+    s = LINUXCNCSTATUS.linuxcnc_status
+    c = linuxcnc_command
+    s.poll()
+
+    # when task_mode is auto and interp_state isn't idle, then we're running a program
+    isRunning = s.task_mode == linuxcnc.MODE_AUTO and s.interp_state != linuxcnc.INTERP_IDLE
+
+    if not isRunning:
+      # if we're not running, make sure we're in auto mode
+      c.mode(linuxcnc.MODE_AUTO)
+
+    # if we are running an error will be reported through the error channel when we try to run this:
+    c.program_open(*args)
+    
 
   def temp_set_ini_data( self, commandDict, linuxcnc_status_poller ):
     reply = { 'code': LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'rowId': commandDict['data']['rowId'] }
@@ -1758,6 +1804,8 @@ class CommandItem( object ):
         # execute command as a linuxcnc module call
         (linuxcnc_command.__getattribute__( self.name ))( *params )
 
+      elif (self.type == CommandItem.METHOD):
+        self.method( *params )
       elif (self.type == CommandItem.HAL):
         # implement the command as a halcommand
         p = subprocess.Popen( ['halcmd'] + filter( lambda a: a != '', [x.strip() for x in params[0].split(' ')]), stderr=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=(1024*64) )
@@ -1852,6 +1900,7 @@ class CommandItem( object ):
 
       return { 'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
     except:
+      logger.error("error in put: %s" % traceback.format_exc())
       return { 'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
 # Custom Command Items
@@ -1893,6 +1942,15 @@ CommandItem( name='tool_offset',             paramTypes=[ {'pname':'toolnumber',
 CommandItem( name='traj_mode',               paramTypes=[ {'pname':'mode', 'ptype':'lookup', 'lookup-vals':['TRAJ_MODE_FREE','TRAJ_MODE_COORD','TRAJ_MODE_TELEOP'], 'optional':False} ],      help='set trajectory mode.  Legal values: TRAJ_MODE_FREE, TRAJ_MODE_COORD, TRAJ_MODE_TELEOP' ).register_in_dict( CommandItems )
 CommandItem( name='unhome',                  paramTypes=[ {'pname':'axis', 'ptype':'int', 'optional':False} ],       help='unhome a given axis' ).register_in_dict( CommandItems )
 CommandItem( name='wait_complete',           paramTypes=[ {'pname':'timeout', 'ptype':'float', 'optional':True} ],       help='wait for completion of the last command sent. If timeout in seconds not specified, default is 1 second' ).register_in_dict( CommandItems )
+
+# Enhanced built-in commands.
+# Commands that require specific modes to function will attempt to switch to that mode.
+# The idea is to simplify what clients need to know in order to use specific commands.
+# The interface should be as close to the original as possible, but will handle switching
+# modes or other subtle requirements that can be handled behind the scenes.
+CommandItem( name='jog_cmd', command_type=CommandItem.METHOD, paramTypes=[ {'pname':'jog', 'ptype':'lookup', 'lookup-vals':['JOG_STOP','JOG_CONTINUOUS','JOG_INCREMENT'], 'optional':False}, { 'pname':'axis', 'ptype':'int', 'optional':False }, { 'pname':'velocity', 'ptype':'float', 'optional':True }, {'pname':'distance', 'ptype':'float', 'optional':True } ],      help='jog(command, axis[, velocity[, distance]]).  Legal values: JOG_STOP, JOG_CONTINUOUS, JOG_INCREMENT' ).register_in_dict( CommandItems )
+CommandItem( name='mdi_cmd', command_type=CommandItem.METHOD, paramTypes=[ {'pname':'mdi', 'ptype':'string', 'optional':False} ],      help='send an MDI command. Maximum 255 chars' ).register_in_dict( CommandItems )
+CommandItem( name='program_open_cmd', command_type=CommandItem.METHOD, paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}],      help='Open an NGC file.' ).register_in_dict( CommandItems )
 
 # Custom command items
 CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
