@@ -1830,6 +1830,7 @@ class CommandItem( object ):
           reply = self.temp_set_ini_data(passed_command_dict, linuxcnc_status_poller)
         elif (self.name == 'clear_error'):
           lastLCNCerror = ""
+          reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': LinuxCNCServerCommand.REPLY_COMMAND_OK }
         elif (self.name == 'shutdown'):
           reply = self.shutdown_linuxcnc()
         elif (self.name == 'shutdown_computer'):
