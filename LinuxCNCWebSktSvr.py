@@ -54,6 +54,7 @@ import machinekit.hal
 #import cProfile
 #import pstats
 #pr = cProfile.Profile()
+#PREV_LOOP_TIME = 0
 
 DEV = os.environ.get('DEV') == 'true'
 if DEV:
@@ -382,6 +383,10 @@ class LinuxCNCStatusPoller(object):
 
   def poll_update(self):
     global linuxcnc_command
+#    global PREV_LOOP_TIME
+#    now = time.time()
+#    logger.debug("BEGINNING OF POLL LOOP %10.5s" % ((now-PREV_LOOP_TIME)*1000))
+#    PREV_LOOP_TIME = now
 
     # update linuxcnc status
     if self.linuxcnc_is_alive:
@@ -442,7 +447,7 @@ def update_gcode_files():
 # Class to track an individual status item
 # *****************************************************
 class StatusItem( object ):
-  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isAsync=False, isDifferent=isNotEqual, lowPriority=False, requiresFeature=None ):
+  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isasync=False, isDifferent=isNotEqual, lowPriority=False, requiresFeature=None ):
     self.name = name
     self.valtype = valtype
     self.help = help
@@ -450,7 +455,7 @@ class StatusItem( object ):
     self.arraylength = arraylen
     self.watchable = watchable
     self.coreLinuxCNCVariable = coreLinuxCNCVariable
-    self.isasync = isAsync
+    self.isasync = isasync
     self.halBinding = None
     self.isDifferent = isDifferent
     self.lowPriority = lowPriority
@@ -480,7 +485,6 @@ class StatusItem( object ):
       "isarray": self.isarray,
       "watchable": self.watchable,
       "coreLinuxCNCVariable": self.coreLinuxCNCVariable,
-      "isasync": self.isasync,
       "lowPriority": self.lowPriority,
       "requiresFeature": self.requiresFeature
     }
@@ -1059,21 +1063,21 @@ StatusItem( name='axis',                     watchable=False, valtype='dict' ,  
 
 # Not currently used, by may be implemented in the future
 #StatusItem( name='backplot',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
-#StatusItem( name='backplot_async',                               coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isAsync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
+#StatusItem( name='backplot_async',                               coreLinuxCNCVariable=False, watchable=False, valtype='string[]', isasync=True, help='Backplot information.  Potentially very large list of lines.' ).register_in_dict( StatusItems )
 
 # Custom status items
 StatusItem( name='board_revision',                               coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='current board revision'                                                                                                                                          ).register_in_dict( StatusItems )
-StatusItem( name='calibration_data',                             coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the calibration.zip file generated from the current machine specific calibration data.'                                                              ).register_in_dict( StatusItems )
+StatusItem( name='calibration_data', isasync=True,               coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the calibration.zip file generated from the current machine specific calibration data.'                                                              ).register_in_dict( StatusItems )
 StatusItem( name='client_config',                                coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Client Configuration.'                                                                                                                                           ).register_in_dict( StatusItems )
-StatusItem( name='compensation',                                 coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='a and b axis compensation'                                                                                                                                       ).register_in_dict( StatusItems )
+StatusItem( name='compensation', isasync=True,                   coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='a and b axis compensation'                                                                                                                                       ).register_in_dict( StatusItems )
 StatusItem( name='config',                                       coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Config (ini) file contents.'                                                                                                                                     ).register_in_dict( StatusItems )
 StatusItem( name='config_item',                                  coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Specific section/name from the config file.  Pass in section=??? and name=???.'                                                                                  ).register_in_dict( StatusItems )
-StatusItem( name='config_overlay',                               coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Config Overlay (ini) file contents.'                                                                                                                             ).register_in_dict( StatusItems )
-StatusItem( name='current_version',                              coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='current PocketNC version (current tag in git repository)'                                                                                                        ).register_in_dict( StatusItems )
-StatusItem( name='dogtag',                                       coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='dogtag'                                                                                                                                                          ).register_in_dict( StatusItems )
+StatusItem( name='config_overlay', isasync=True,                 coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Config Overlay (ini) file contents.'                                                                                                                             ).register_in_dict( StatusItems )
+StatusItem( name='current_version', isasync=True,                coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='current PocketNC version (current tag in git repository)'                                                                                                        ).register_in_dict( StatusItems )
+StatusItem( name='dogtag', isasync=True,                         coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='dogtag'                                                                                                                                                          ).register_in_dict( StatusItems )
 StatusItem( name='error',                                        coreLinuxCNCVariable=False, watchable=True,  valtype='dict',     help='Error queue.'                                                                                                                                                    ).register_in_dict( StatusItems )
-StatusItem( name='file_content',                                 coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='currently executing gcode file contents'                                                                                                                         ).register_in_dict( StatusItems )
-StatusItem( name='halgraph',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"'                                            ).register_in_dict( StatusItems )
+StatusItem( name='file_content', isasync=True,                   coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='currently executing gcode file contents'                                                                                                                         ).register_in_dict( StatusItems )
+StatusItem( name='halgraph', isasync=True,                       coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"'                                            ).register_in_dict( StatusItems )
 StatusItem( name='halpin_halui.max-velocity.value',              coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='maxvelocity'                                                                                                                                                     ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.pressure',                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Pressure in MPa as read by MPRLS.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                                                         ).register_in_dict( StatusItems )
 StatusItem( name='halpin_hss_sensors.temperature',               coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Temperature in C as read by MCP9808', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                                                       ).register_in_dict( StatusItems )
@@ -1089,13 +1093,13 @@ StatusItem( name='pressure_data',                                coreLinuxCNCVar
 StatusItem( name='rotary_motion_only',                           coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='True if any rotational axis is in motion but not any linear axis.'                                                                                               ).register_in_dict( StatusItems ) 
 StatusItem( name='rtc_seconds',                                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Run time of current cycle in seconds'                                                                                                                            ).register_in_dict( StatusItems )
 StatusItem( name='running',                                      coreLinuxCNCVariable=False, watchable=True,  valtype='int',      help='True if linuxcnc is up and running.'                                                                                                                             ).register_in_dict( StatusItems )
-StatusItem( name='system_status',                                coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='System status information, such as IP addresses, disk usage, etc.'                                                                                               ).register_in_dict( StatusItems )
+StatusItem( name='system_status', isasync=True,                  coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='System status information, such as IP addresses, disk usage, etc.'                                                                                               ).register_in_dict( StatusItems )
 StatusItem( name='temperature_data',                             coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Temperature data history, back as far as one hour. Key is timestamp.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                      ).register_in_dict( StatusItems )
 StatusItem( name='usb_detected',                                 coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media', lowPriority=True                                                        ).register_in_dict( StatusItems )
-StatusItem( name='usb_map',                                      coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]'                                        ).register_in_dict( StatusItems )
-StatusItem( name='usb_software_files',                           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Return any files that match pocketnc*.p for updating the software via USB.'                                                                                      ).register_in_dict( StatusItems )
+StatusItem( name='usb_map', isasync=True,                        coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]'                                        ).register_in_dict( StatusItems )
+StatusItem( name='usb_software_files', isasync=True,             coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Return any files that match pocketnc*.p for updating the software via USB.'                                                                                      ).register_in_dict( StatusItems )
 StatusItem( name='users',                                        coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Web server user list.'                                                                                                                                           ).register_in_dict( StatusItems )
-StatusItem( name='versions',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='available PocketNC versions (list of tags available in git repository)'                                                                                          ).register_in_dict( StatusItems )
+StatusItem( name='versions', isasync=True,                       coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='available PocketNC versions (list of tags available in git repository)'                                                                                          ).register_in_dict( StatusItems )
 
 # *****************************************************
 # Class to issue cnc commands
@@ -1810,16 +1814,6 @@ class CommandItem( object ):
 
       elif (self.type == CommandItem.METHOD):
         self.method( *params )
-      elif (self.type == CommandItem.HAL):
-        # implement the command as a halcommand
-        p = subprocess.Popen( ['halcmd'] + filter( lambda a: a != '', [x.strip() for x in params[0].split(' ')]), stderr=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=(1024*64) )
-        stdouterr = p.communicate()
-        reply = {}
-        reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
-        reply['data'] = {}
-        reply['data']['out']=stdouterr[0]
-        reply['data']['err']=stdouterr[1]
-        return reply
       elif (self.type == CommandItem.SYSTEM):
         # command is a special system command
         reply = {}
@@ -1958,35 +1952,34 @@ CommandItem( name='mdi_cmd', command_type=CommandItem.METHOD, paramTypes=[ {'pna
 CommandItem( name='program_open_cmd', command_type=CommandItem.METHOD, paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}],      help='Open an NGC file.' ).register_in_dict( CommandItems )
 
 # Custom command items
-CommandItem( name='add_user',                paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='add_user', isasync=True,  paramTypes=[ {'pname':'username', 'ptype':'string', 'optional':False}, {'pname':'password', 'ptype':'string', 'optional':False} ], help='Add a user to the web server.  Set password to - to delete the user.  If all users are deleted, then a user named default, password=default will be created.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='check_for_updates',      isasync=True, paramTypes=[ ],     help='Use git fetch to retrieve any updates', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='check_usb_file_for_updates', isasync=True, paramTypes=[ { 'pname': 'file', 'ptype': 'string', 'optional': False }, { 'pname': 'require_valid_signature', 'ptype': 'bool', 'optional': False } ], help="Check file on USB for updates.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='clear_error',             paramTypes=[  ],       help='Clear the last error condition.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='clear_logs', isasync=False, paramTypes=[], help='Truncate log files found in /var/log to 0 bytes.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='clear_ncfiles', isasync=False, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='create_swap', isasync=False, paramTypes=[], help='Create a swap file, allocate disk space, and add necessary entry to /etc/fstab.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='config',                  paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config overlay file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='clear_logs', isasync=True, paramTypes=[], help='Truncate log files found in /var/log to 0 bytes.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='clear_ncfiles', isasync=True, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='create_swap', isasync=True, paramTypes=[], help='Create a swap file, allocate disk space, and add necessary entry to /etc/fstab.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='config', isasync=True,    paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config overlay file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='delete_swap', isasync=True, paramTypes=[], help='Delete an existing swap file and /etc/fstab entry.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='disable_swap', isasync=True, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='enable_swap', isasync=True, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
-CommandItem( name='program_upload_chunk',    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
-CommandItem( name='program_download_chunk',  paramTypes=[ {'pname':'idx', 'ptype':'int', 'optional':False}, {'pname':'size', 'ptype':'int', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Send a chunk of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
-CommandItem( name='program_get_size',        paramTypes=[], command_type=CommandItem.SYSTEM, help='Send the size of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
-CommandItem( name='program_delete',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Delete a file from the programs directory.' ).register_in_dict( CommandItems )
-CommandItem( name='halcmd',                  paramTypes=[ {'pname':'param_string', 'ptype':'string', 'optional':False} ],  help='Call halcmd. Results returned in a string.', command_type=CommandItem.HAL ).register_in_dict( CommandItems )
+CommandItem( name='eject_usb',   isasync=True, paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='program_upload',  isasync=True,         paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
+CommandItem( name='program_upload_chunk', isasync=True,    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
+CommandItem( name='program_download_chunk', isasync=True,  paramTypes=[ {'pname':'idx', 'ptype':'int', 'optional':False}, {'pname':'size', 'ptype':'int', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Send a chunk of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
+CommandItem( name='program_get_size',  isasync=True,       paramTypes=[], command_type=CommandItem.SYSTEM, help='Send the size of the open NGC file back to the front end.' ).register_in_dict( CommandItems )
+CommandItem( name='program_delete', isasync=True,        paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Delete a file from the programs directory.' ).register_in_dict( CommandItems )
 CommandItem( name='ini_file_name',           paramTypes=[ {'pname':'ini_file_name', 'ptype':'string', 'optional':False} ],  help='Set the INI file to use on next linuxCNC load.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='reset_clock',             paramTypes=[], help='Set the run time clock to 0 seconds', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='interlock_release',       paramTypes=[  ], help='Stop inhibiting spindle and feed in interlock component.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='restart',          isasync=True, paramTypes=[ ],       help='Restart LinuxCNC and Rockhopper using systemctl.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='save_client_config',      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='set_compensation',      paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],     help='Save a and b axis compensation tables', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='save_client_config', isasync=True,      paramTypes=[ {'pname':'key', 'ptype':'string', 'optional':False}, {'pname':'value', 'ptype':'string', 'optional':False} ],     help='Save a JSON object representing client configuration.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='set_compensation', isasync=True,      paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],     help='Save a and b axis compensation tables', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_date', isasync=False, paramTypes=[], help='Set the system time', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_m6_tool_probe',       paramTypes=[ {'pname':'onoff', 'ptype':'int', 'optional':False} ], help="Set m6_tool_probe on/off.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='set_version',      isasync=True, paramTypes=[ { 'pname':'version', 'ptype':'string', 'optional':False} ],     help='Check out the provided version as a git tag', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='shutdown',                paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='shutdown_computer',                paramTypes=[ ],       help='Shutdown the computer.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='shutdown', isasync=True,  paramTypes=[ ],       help='Shutdown LinuxCNC system.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='shutdown_computer', isasync=True,         paramTypes=[ ],       help='Shutdown the computer.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='temp_set_config_item',    paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Temporarily set a single INI config item so that the change takes effect in linuxcnc, but is not saved to the INI file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='toggle_v1_v2revP',          isasync=True, paramTypes=[ ],       help='Toggle between the v1 and the v2revP. The v1 and v2revP have no way to detect the current hardware so this command allows users to toggle between them.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 
@@ -2120,15 +2113,16 @@ class LinuxCNCServerCommand( object ):
     except:
       pass
 
-  def monitor_async(self):
-    if len(self.async_reply_buf) > 0:
-      self.async_reply_buf_lock.acquire()
-
-      self.replyval = self.async_reply_buf[0]         
-      self.server_command_handler.send_message( self.form_reply() )
-      self.async_reply_buf_lock.release()
-
-      self.linuxcnc_status_poller.del_observer( self.monitor_async )
+# This was used for backplot_async
+#  def monitor_async(self):
+#    if len(self.async_reply_buf) > 0:
+#      self.async_reply_buf_lock.acquire()
+#
+#      self.replyval = self.async_reply_buf[0]         
+#      self.server_command_handler.send_message( self.form_reply() )
+#      self.async_reply_buf_lock.release()
+#
+#      self.linuxcnc_status_poller.del_observer( self.monitor_async )
     
     return
 
@@ -2148,11 +2142,30 @@ class LinuxCNCServerCommand( object ):
         if self.statusitem is None:
           self.replyval['code'] = LinuxCNCServerCommand.REPLY_STATUS_NOT_FOUND
         else:
+          if self.statusitem.isasync:
+            def runOnIOLoop(server_command_handler, reply):
+              # write_message isn't thread safe, so we have to run this in the IOLoop
+              server_command_handler.write_message(reply)
+                
+            def runInThread(statusitem, commandDict, linuxcnc_status_poller, server_command_handler):
+              if statusitem.isarray:
+                self.item_index = self.commandDict['index']
+                self.replyval['index'] = self.item_index
+              self.replyval = statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, commandDict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
+              json_reply = self.form_reply()
+
+              main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply)
+
+            thread = threading.Thread(target=runInThread, args=(self.statusitem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
+            thread.start()
+            return None
+
           if self.statusitem.isarray:
             self.item_index = self.commandDict['index']
             self.replyval['index'] = self.item_index
-          if self.statusitem.isasync:
-            self.linuxcnc_status_poller.add_observer( self.monitor_async )
+# this was used for backplot_async
+#          if self.statusitem.isasync:
+#            self.linuxcnc_status_poller.add_observer( self.monitor_async )
               
           self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
       except:
