@@ -161,6 +161,20 @@ ConfigHelp['AXIS_7'] = ConfigHelp['AXIS_0'];
 ConfigHelp['AXIS_8'] = ConfigHelp['AXIS_0'];
 ConfigHelp['AXIS_9'] = ConfigHelp['AXIS_0'];
 
+def get_ini_data(ini_data, only_section=None, only_name=None):
+  filtered_ini_data = ini_data
+  if only_section:
+    filtered_ini_data = { "sections": { only_section: ini_data["sections"][only_section] }, "parameters": [] }
+
+    for param in ini_data["parameters"]:
+      if only_name:
+        if param["values"]["section"] == only_section and param["values"]["name"] == only_name:
+          filtered_ini_data["parameters"].append(param)
+      else:
+        if param["values"]["section"] == only_section:
+          filtered_ini_data["parameters"].append(param)
+    return filtered_ini_data
+
 def read_ini_data(ini_file, only_section=None, only_name=None):
     INIFileData = {
         "parameters":[],

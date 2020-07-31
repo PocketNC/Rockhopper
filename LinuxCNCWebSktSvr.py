@@ -48,7 +48,7 @@ import zipfile
 from time import strftime
 from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
-from ini import read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
+from ini import get_ini_data, read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
 
 #import cProfile
@@ -176,7 +176,7 @@ class LinuxCNCStatusPoller(object):
     # register listeners
     self.observers = []
     self.observers_low_priority = []
-    hss_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'HIGH_SPEED_SPINDLE')
+    hss_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', HIGH_SPEED_SPINDLE)
     self.is_hss = hss_ini_data is not None and hss_ini_data['values']['value'] == '1'
     if self.is_hss:
       # wait here until the hss userspace components are loaded
@@ -216,7 +216,7 @@ class LinuxCNCStatusPoller(object):
     for n in range(5):
       self.axis_velocities[n] = machinekit.hal.Pin("axis." + `n` + ".joint-vel-cmd")
     
-    interlock_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', 'INTERLOCK')
+    interlock_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', INTERLOCK)
     self.has_interlock = interlock_ini_data is not None and interlock_ini_data['values']['value'] == '1'
     if self.has_interlock:
       while True:
@@ -442,7 +442,7 @@ def update_gcode_files():
 # Class to track an individual status item
 # *****************************************************
 class StatusItem( object ):
-  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isAsync=False, isDifferent=isNotEqual, lowPriority=False ):
+  def __init__( self, name=None, valtype='', help='', watchable=True, isarray=False, arraylen=0, coreLinuxCNCVariable=True, isAsync=False, isDifferent=isNotEqual, lowPriority=False, requiresFeature=None ):
     self.name = name
     self.valtype = valtype
     self.help = help
@@ -454,6 +454,7 @@ class StatusItem( object ):
     self.halBinding = None
     self.isDifferent = isDifferent
     self.lowPriority = lowPriority
+    self.requiresFeature = requiresFeature
 
 
   @staticmethod
@@ -480,7 +481,8 @@ class StatusItem( object ):
       "watchable": self.watchable,
       "coreLinuxCNCVariable": self.coreLinuxCNCVariable,
       "isasync": self.isasync,
-      "lowPriority": self.lowPriority
+      "lowPriority": self.lowPriority,
+      "requiresFeature": self.requiresFeature
     }
 
   def backplot_async( self, async_buffer, async_lock, linuxcnc_status_poller ):
@@ -608,7 +610,8 @@ class StatusItem( object ):
   @staticmethod
   def get_ini_data( only_section=None, only_name=None ):
     try:
-      ini_data = read_ini_data(INI_FILENAME, only_section, only_name)
+      ini_data = get_ini_data(INI_FILE_CACHE, only_section, only_name)
+
       reply = {'data': ini_data,'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
     except Exception as ex:
       reply = {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND,'data':''}
@@ -878,10 +881,10 @@ class StatusItem( object ):
               self.update_hss_sensor_data(ret['data'], pressureData, 0.001)
             elif( self.name.find('temperature') != -1 ):
               self.update_hss_sensor_data(ret['data'], temperatureData, 0.1)
-        elif (self.name.find('backplot_async') is 0):
-           ret = self.backplot_async(async_buffer, async_lock,linuxcnc_status_poller)
-        elif (self.name.find('backplot') is 0):
-          ret['data'] = self.backplot()
+#        elif (self.name.find('backplot_async') is 0):
+#           ret = self.backplot_async(async_buffer, async_lock,linuxcnc_status_poller)
+#        elif (self.name.find('backplot') is 0):
+#          ret['data'] = self.backplot()
         elif (self.name == 'ini_file_name'):
           ret['data'] = INI_FILENAME
         elif (self.name == 'file_content'):
@@ -957,6 +960,12 @@ class StatusItemEncoder(json.JSONEncoder):
     if isinstance(obj, CommandItem):
       return { "name":obj.name, "paramTypes":obj.paramTypes, "help":obj.help }
     return json.JSONEncoder.default(self, obj)
+
+# *****************************************************
+# Features that certain StatusItems require
+# *****************************************************
+HIGH_SPEED_SPINDLE = "HIGH_SPEED_SPINDLE"
+INTERLOCK = "INTERLOCK"
 
 # *****************************************************
 # Global list of possible status items from linuxcnc
@@ -1066,22 +1075,22 @@ StatusItem( name='error',                                        coreLinuxCNCVar
 StatusItem( name='file_content',                                 coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='currently executing gcode file contents'                                                                                                                         ).register_in_dict( StatusItems )
 StatusItem( name='halgraph',                                     coreLinuxCNCVariable=False, watchable=False, valtype='string',   help='Filename of the halgraph generated from the currently running instance of LinuxCNC.  Filename will be "halgraph.svg"'                                            ).register_in_dict( StatusItems )
 StatusItem( name='halpin_halui.max-velocity.value',              coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='maxvelocity'                                                                                                                                                     ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.pressure',                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Pressure in MPa as read by MPRLS.', lowPriority=True                                                                                                             ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_sensors.temperature',               coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Temperature in C as read by MCP9808', lowPriority=True                                                                                                           ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.full_warmup_needed',         coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True                                                                                 ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.performing_warmup',          coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates the high speed spindle warm up is in process.', lowPriority=True                                                                             ).register_in_dict( StatusItems )
-StatusItem( name='halpin_hss_warmup.warmup_needed',              coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True                                                                                 ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.pressure',                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Pressure in MPa as read by MPRLS.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                                                         ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_sensors.temperature',               coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Temperature in C as read by MCP9808', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                                                       ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.full_warmup_needed',         coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                             ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.performing_warmup',          coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates the high speed spindle warm up is in process.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                         ).register_in_dict( StatusItems )
+StatusItem( name='halpin_hss_warmup.warmup_needed',              coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Flag that indicates high speed spindle needs to be warmed up.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                             ).register_in_dict( StatusItems )
 StatusItem( name='halpin_spindle_voltage.speed_measured',        coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Measured spindle speed using clock pin'                                                                                                                          ).register_in_dict( StatusItems )
-StatusItem( name='halsig_interlockClosed',                       coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Monitors status of interlock. Also true if not equipped with interlock.'                                                                                         ).register_in_dict( StatusItems )
-StatusItem( name='halpin_interlock.program-paused-by-interlock', coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.' ).register_in_dict( StatusItems )
+StatusItem( name='halsig_interlockClosed',                       coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='Monitors status of interlock. Also true if not equipped with interlock.', requiresFeature=INTERLOCK                                                              ).register_in_dict( StatusItems )
+StatusItem( name='halpin_interlock.program-paused-by-interlock', coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='If the interlock is opened while a program is loaded (running or paused), the interlock will inhibit the spindle and feed until its release pin is set to TRUE.', requiresFeature=INTERLOCK ).register_in_dict( StatusItems )
 StatusItem( name='ini_file_name',                                coreLinuxCNCVariable=False, watchable=True,  valtype='string',   help='INI file to use for next LinuxCNC start.'                                                                                                                        ).register_in_dict( StatusItems )
 StatusItem( name='ls',                                           coreLinuxCNCVariable=False, watchable=True,  valtype='string[]', help='Get a list of gcode (*.ngc) files in the [DISPLAY]PROGRAM_PREFIX directory.'                                                                                     ).register_in_dict( StatusItems )
-StatusItem( name='pressure_data',                                coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Pressure data history, back as far as one hour', lowPriority=True                                                                                                ).register_in_dict( StatusItems )
+StatusItem( name='pressure_data',                                coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Pressure data history, back as far as one hour', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                                            ).register_in_dict( StatusItems )
 StatusItem( name='rotary_motion_only',                           coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='True if any rotational axis is in motion but not any linear axis.'                                                                                               ).register_in_dict( StatusItems ) 
 StatusItem( name='rtc_seconds',                                  coreLinuxCNCVariable=False, watchable=True,  valtype='float',    help='Run time of current cycle in seconds'                                                                                                                            ).register_in_dict( StatusItems )
 StatusItem( name='running',                                      coreLinuxCNCVariable=False, watchable=True,  valtype='int',      help='True if linuxcnc is up and running.'                                                                                                                             ).register_in_dict( StatusItems )
 StatusItem( name='system_status',                                coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='System status information, such as IP addresses, disk usage, etc.'                                                                                               ).register_in_dict( StatusItems )
-StatusItem( name='temperature_data',                             coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Temperature data history, back as far as one hour. Key is timestamp.', lowPriority=True                                                                          ).register_in_dict( StatusItems )
+StatusItem( name='temperature_data',                             coreLinuxCNCVariable=False, watchable=True,  valtype='float[]',  help='Temperature data history, back as far as one hour. Key is timestamp.', lowPriority=True, requiresFeature=HIGH_SPEED_SPINDLE                                      ).register_in_dict( StatusItems )
 StatusItem( name='usb_detected',                                 coreLinuxCNCVariable=False, watchable=True,  valtype='bool',     help='Checks if any USB drives have been mounted at one of the USB sub-directories in /media', lowPriority=True                                                        ).register_in_dict( StatusItems )
 StatusItem( name='usb_map',                                      coreLinuxCNCVariable=False, watchable=False, valtype='dict',     help='Create a nested dictionary that represents the folder structure of a USB device that has been mounted at /media/usb[0-7]'                                        ).register_in_dict( StatusItems )
 StatusItem( name='usb_software_files',                           coreLinuxCNCVariable=False, watchable=False, valtype='string[]', help='Return any files that match pocketnc*.p for updating the software via USB.'                                                                                      ).register_in_dict( StatusItems )
@@ -1319,7 +1328,7 @@ class CommandItem( object ):
     except:
       return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'refresh_ui' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
 
   def set_date(self, dateString):
@@ -1328,12 +1337,12 @@ class CommandItem( object ):
     except Exception as e:
       return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, "data": e.message }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'set_date' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
 
   #Create a swap file, allocate space, set permissions, and make entry in /etc/fstab
   def create_swap(self, commandDict):
-    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'create_swap', 'data' : { 'isSwapCmd' : 'true' } }
+    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data' : { 'isSwapCmd' : 'true' } }
     try:
       #df reports disk space with units of KiB
       diskSpaceMb = StatusItems['system_status'].get_system_status()['data']['disk']['available'] * 0.001024
@@ -1355,7 +1364,7 @@ class CommandItem( object ):
     return reply
 
   def enable_swap(self, commandDict):
-    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'enable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data' : { 'isSwapCmd' : 'true' } }
     try:
       subprocess.call(['sudo', 'swapon', '/my_swap'])
     except Exception as e:
@@ -1365,7 +1374,7 @@ class CommandItem( object ):
     return reply
 
   def disable_swap(self, commandDict):
-    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'disable_swap', 'data' : { 'isSwapCmd' : 'true' } }
+    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data' : { 'isSwapCmd' : 'true' } }
     try:
       p = subprocess.Popen(['sudo', 'swapoff', '-v', '/my_swap'], stderr=subprocess.PIPE, stdout=subprocess.PIPE )
       result, err = p.communicate()
@@ -1379,7 +1388,7 @@ class CommandItem( object ):
 
   #Delete swap file and its entry in /etc/fstab
   def delete_swap(self, commandDict):
-    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'delete_swap', 'data' : { 'isSwapCmd' : 'true' } }
+    reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data' : { 'isSwapCmd' : 'true' } }
     try:
       subprocess.call(['sudo', 'sed', '-i', '/my_swap swap swap defaults 0 0/d', '/etc/fstab'])
       subprocess.call(['sudo', 'rm', '/my_swap'])
@@ -1395,7 +1404,7 @@ class CommandItem( object ):
     except:
      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_logs' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
   def clear_ncfiles(self, commandDict):
     try:
@@ -1404,7 +1413,7 @@ class CommandItem( object ):
     except:
       return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'id': 'clear_ncfiles' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
 
   def check_for_updates(self, commandDict):
     try:
@@ -1416,7 +1425,7 @@ class CommandItem( object ):
     except:
       return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions, 'id': 'versions' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions }
 
   def put_compensation(self, data):
     reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
@@ -1460,16 +1469,11 @@ class CommandItem( object ):
 
     reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
 
-    try:
-      jsonobj = json.loads( CLIENT_CONFIG_DATA )
-      jsonobj[key] = value
-    except:
-      jsonobj = {}
+    CLIENT_CONFIG_DATA[key] = value
   
     try:    
-      CLIENT_CONFIG_DATA = json.dumps(jsonobj)
       fo = open( CONFIG_FILENAME, 'w' )
-      fo.write( CLIENT_CONFIG_DATA )
+      fo.write( json.dumps(CLIENT_CONFIG_DATA) )
     except:
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     finally:
@@ -1632,11 +1636,11 @@ class CommandItem( object ):
       if os.path.exists("/tmp/pocketnc.tar.gz"):
         os.remove("/tmp/pocketnc.tar.gz")
     except:
-      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Error removing existing /tmp/pocketnc.tar.gz" }
+      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'data': "Error removing existing /tmp/pocketnc.tar.gz" }
     try:
       shutil.rmtree("/tmp/pocketnc", ignore_errors=True)
     except:
-      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Error removing existing /tmp/pocketnc folder" }
+      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'data': "Error removing existing /tmp/pocketnc folder" }
 
     try:
       gpgOutput = subprocess.check_output(['gpg', '--status-fd', '1', '--output', '/tmp/pocketnc.tar.gz', '--decrypt', '/media/usb0/%s' % file], cwd=POCKETNC_DIRECTORY)
@@ -1646,7 +1650,7 @@ class CommandItem( object ):
       gpgReturnStatus = e.returncode
 
     if require_valid_signature and "VALIDSIG" not in gpgOutput:
-      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Invalid signature" }
+      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'data': "Invalid signature" }
 
     try:
       subprocess.call(['tar', 'xzf', '/tmp/pocketnc.tar.gz', '--directory', '/tmp'])
@@ -1658,9 +1662,9 @@ class CommandItem( object ):
       subprocess.call(['rm', '-rf', '/tmp/pocketnc'])
       subprocess.call(['rm', '/tmp/pocketnc.tar.gz'])
     except:
-      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'id': 'check_usb_file_for_updates', 'data': "Exception during usb software check" }
+      return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND, 'data': "Exception during usb software check" }
 
-    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions, 'id': 'check_usb_file_for_updates' }
+    return { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data': all_versions }
 
   # If any USB drive is mounted, stop any processes which are accessing the drive, then unmount it.
   # The mountSlot is an integer corresponding to one of the 8 usbmount directories ('/media/usb[0,8)')
@@ -1962,9 +1966,9 @@ CommandItem( name='clear_logs', isasync=False, paramTypes=[], help='Truncate log
 CommandItem( name='clear_ncfiles', isasync=False, paramTypes=[], help='Clear files in the PROGRAM_PREFIX directory.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='create_swap', isasync=False, paramTypes=[], help='Create a swap file, allocate disk space, and add necessary entry to /etc/fstab.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='config',                  paramTypes=[ {'pname':'data', 'ptype':'dict', 'optional':False} ],       help='Overwrite the config overlay file.  Parameter is a dictionary with the same format as returned from "get config"', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='delete_swap', isasync=False, paramTypes=[], help='Delete an existing swap file and /etc/fstab entry.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='disable_swap', isasync=False, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
-CommandItem( name='enable_swap', isasync=False, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='delete_swap', isasync=True, paramTypes=[], help='Delete an existing swap file and /etc/fstab entry.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='disable_swap', isasync=True, paramTypes=[], help='Disable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
+CommandItem( name='enable_swap', isasync=True, paramTypes=[], help='Enable an existing swap file.', command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='eject_usb',               paramTypes=[], help="Safely unmount a device that is plugged in to USB host port.", command_type=CommandItem.SYSTEM ).register_in_dict( CommandItems )
 CommandItem( name='program_upload',          paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
 CommandItem( name='program_upload_chunk',    paramTypes=[ {'pname':'filename', 'ptype':'string', 'optional':False}, {'pname':'data', 'ptype':'string', 'optional':False}, {'pname':'start', 'ptype':'bool', 'optional':False}, {'pname':'end', 'ptype':'bool', 'optional':False}, {'pname':'ovw', 'ptype':'bool', 'optional':False} ], command_type=CommandItem.SYSTEM, help='Create and open an NGC file.' ).register_in_dict( CommandItems )
@@ -2199,14 +2203,14 @@ class LinuxCNCServerCommand( object ):
             server_command_handler.write_message(reply)
               
           def runInThread(commanditem, commandDict, linuxcnc_status_poller, server_command_handler):
-            reply = commanditem.execute(commandDict, linuxcnc_status_poller)
-            json_reply = json.dumps(reply, cls=StatusItemEncoder)
+            self.replyval = commanditem.execute(commandDict, linuxcnc_status_poller)
+            json_reply = self.form_reply()
 
             main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply)
 
           thread = threading.Thread(target=runInThread, args=(self.commanditem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
           thread.start()
-          self.replyval = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+          return None
         else:
           self.replyval = self.commanditem.execute( self.commandDict, self.linuxcnc_status_poller )
       except:
@@ -2252,10 +2256,11 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
     if self.user_validated:
       try:
         reply = LinuxCNCServerCommand( StatusItems, CommandItems, self, LINUXCNCSTATUS, command_message=message ).execute()
-        self.write_message(reply)
-        if int(options.verbose) > 3:
-          if (reply.find("\"HB\"") < 0) and (reply.find("backplot") < 0):
-              print "Reply: " + reply
+        if reply:
+          self.write_message(reply)
+          if int(options.verbose) > 3:
+            if (reply.find("\"HB\"") < 0) and (reply.find("backplot") < 0):
+                print "Reply: " + reply
       except Exception as ex:
         logger.error("Exception in on_message: %s" % (ex,))
     else:
@@ -2536,7 +2541,7 @@ def main():
   LINUXCNCSTATUS = LinuxCNCStatusPoller(main_loop, UpdateStatusPollPeriodInMilliSeconds)
 
   with open( CONFIG_FILENAME, 'r' ) as fh:
-    CLIENT_CONFIG_DATA = fh.read()
+    CLIENT_CONFIG_DATA = json.loads(fh.read())
 
   GCODE_DIRECTORY = get_parameter(INI_FILE_CACHE, 'DISPLAY', 'PROGRAM_PREFIX' )['values']['value']
   GCODE_FILES = get_gcode_files(GCODE_DIRECTORY)
