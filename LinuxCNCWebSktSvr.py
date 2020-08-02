@@ -50,6 +50,34 @@ from optparse import OptionParser
 from netifaces import interfaces, ifaddresses, AF_INET
 from ini import get_ini_data, read_ini_data, write_ini_data, ini_differences, merge_ini_data, get_parameter, set_parameter
 import machinekit.hal
+from collections import deque
+
+class WorkQueue(object):
+  def __init__(self):
+    self.queue = deque()
+    self.semaphore = threading.Semaphore(0)
+    self.thread = threading.Thread(target=self.doWork)
+    self.thread.start()
+    self.stopped = False
+
+  def doWork(self):
+    while True:
+      self.semaphore.acquire() # blocks when semaphore count is 0, otherwise, decrements semaphore count by 1
+      if self.stopped:
+        return
+      work = self.queue.pop()
+      work()
+
+  def addWork(self, work):
+    self.queue.append(work)
+    self.semaphore.release() # increments semaphore count by 1
+
+  def stop(self):
+    self.stopped = True      # doWork will return right after unblocking if stopped is True
+    self.semaphore.release() # release the semaphore in case we're blocking
+
+
+WORK_QUEUE = None
 
 #import cProfile
 #import pstats
@@ -137,6 +165,9 @@ pressureData = []
 temperatureData = []
 
 def sigterm_handler(_signo, _stack_frame):
+  global WORK_QUEUE
+  WORK_QUEUE.stop()
+  WORK_QUEUE = None
   main_loop.stop()
   sys.exit(0)
 
@@ -2147,17 +2178,16 @@ class LinuxCNCServerCommand( object ):
               # write_message isn't thread safe, so we have to run this in the IOLoop
               server_command_handler.write_message(reply)
                 
-            def runInThread(statusitem, commandDict, linuxcnc_status_poller, server_command_handler):
-              if statusitem.isarray:
+            def runInThread():
+              if self.statusitem.isarray:
                 self.item_index = self.commandDict['index']
                 self.replyval['index'] = self.item_index
-              self.replyval = statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, commandDict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
+              self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict, async_buffer=self.async_reply_buf, async_lock=self.async_reply_buf_lock )
               json_reply = self.form_reply()
 
-              main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply)
+              main_loop.add_callback(runOnIOLoop, self.server_command_handler, json_reply)
 
-            thread = threading.Thread(target=runInThread, args=(self.statusitem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
-            thread.start()
+            WORK_QUEUE.addWork(runInThread)
             return None
 
           if self.statusitem.isarray:
@@ -2215,14 +2245,13 @@ class LinuxCNCServerCommand( object ):
             # write_message isn't thread safe, so we have to run this in the IOLoop
             server_command_handler.write_message(reply)
               
-          def runInThread(commanditem, commandDict, linuxcnc_status_poller, server_command_handler):
-            self.replyval = commanditem.execute(commandDict, linuxcnc_status_poller)
+          def runInThread():
+            self.replyval = self.commanditem.execute(self.commandDict, self.linuxcnc_status_poller)
             json_reply = self.form_reply()
 
-            main_loop.add_callback(runOnIOLoop, server_command_handler, json_reply)
+            main_loop.add_callback(runOnIOLoop, self.server_command_handler, json_reply)
 
-          thread = threading.Thread(target=runInThread, args=(self.commanditem, self.commandDict, self.linuxcnc_status_poller, self.server_command_handler ))
-          thread.start()
+          WORK_QUEUE.addWork(runInThread)
           return None
         else:
           self.replyval = self.commanditem.execute( self.commandDict, self.linuxcnc_status_poller )
@@ -2523,6 +2552,7 @@ def main():
   global CLIENT_CONFIG_DATA
   global GCODE_DIRECTORY
   global GCODE_FILES
+  global WORK_QUEUE
 
   def fn():
     logger.debug("Webserver reloading...")
@@ -2567,6 +2597,8 @@ def main():
   logging.basicConfig(filename=os.path.join("/var/log/linuxcnc_webserver.log"),format='%(asctime)sZ pid:%(process)s module:%(module)s %(message)s', level=logging.DEBUG if DEV else logging.ERROR)
 
   readUserList()
+
+  WORK_QUEUE = WorkQueue()
 
   logger.info("Starting linuxcnc http server...")
 
