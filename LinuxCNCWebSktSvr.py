@@ -1580,9 +1580,6 @@ class CommandItem( object ):
           fo.close()
         except:
           reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-
-      if reply['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK:
-        linuxcnc_command.program_open( os.path.join( path, f ) )
     except Exception as ex:
       logger.error("Exception in put_gcode_file: %s" % (ex,))
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
@@ -1623,8 +1620,6 @@ class CommandItem( object ):
         os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), os.path.join( path, f))
         uploadingFile.close()
         update_gcode_files()
-        linuxcnc_command.program_open( os.path.join( path, f ) ) 
-   
     except Exception as ex:
       logger.error("Exception in put_chunk_gcode_file: %s" % (ex,))
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
