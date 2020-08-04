@@ -166,8 +166,8 @@ temperatureData = []
 
 def sigterm_handler(_signo, _stack_frame):
   global WORK_QUEUE
-  WORK_QUEUE.stop()
-  WORK_QUEUE = None
+  if WORK_QUEUE:
+    WORK_QUEUE.stop()
   main_loop.stop()
   sys.exit(0)
 
