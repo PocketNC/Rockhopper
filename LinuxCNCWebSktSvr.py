@@ -1624,7 +1624,9 @@ class CommandItem( object ):
             os.remove(os.path.join(path,f))
           except OSError:
             pass
-        os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), os.path.join( path, f))
+        newFilename =  os.path.join( path, f)
+        os.rename(os.path.join( tempfile.gettempdir(), 'ncfiles',  f ), newFilename)
+        reply['data'] = newFilename
         uploadingFile.close()
         update_gcode_files()
     except Exception as ex:
