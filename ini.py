@@ -173,7 +173,7 @@ def get_ini_data(ini_data, only_section=None, only_name=None):
       else:
         if param["values"]["section"] == only_section:
           filtered_ini_data["parameters"].append(param)
-    return filtered_ini_data
+  return filtered_ini_data
 
 def read_ini_data(ini_file, only_section=None, only_name=None):
     INIFileData = {
