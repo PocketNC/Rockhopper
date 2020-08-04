@@ -21,6 +21,7 @@
 import traceback
 import sys
 import os
+import uuid
 import linuxcnc
 import datetime
 import math
@@ -206,8 +207,8 @@ class LinuxCNCStatusPoller(object):
     self.scheduler_errors.start()
 
     # register listeners
-    self.observers = []
-    self.observers_low_priority = []
+    self.observers = {}
+    self.observers_low_priority = {}
     hss_ini_data = get_parameter(INI_FILE_CACHE, 'POCKETNC_FEATURES', HIGH_SPEED_SPINDLE)
     self.is_hss = hss_ini_data is not None and hss_ini_data['values']['value'] == '1'
     if self.is_hss:
@@ -270,20 +271,26 @@ class LinuxCNCStatusPoller(object):
     
     self.counter = 0
 
-  def add_observer_low_priority(self, callback):
-    self.observers_low_priority.append(callback)
+  def has_observer_low_priority(self, id):
+    return True if self.observers_low_priority.get(id) else False
 
-  def del_observer_low_priority(self, callback):
-    self.observers_low_priority.remove(callback)
+  def add_observer_low_priority(self, id, callback):
+    self.observers_low_priority[id] = callback
 
-  def add_observer(self, callback):
-    self.observers.append(callback)
+  def del_observer_low_priority(self, id):
+    del self.observers_low_priority[id]
 
-  def del_observer(self, callback):
-    self.observers.remove(callback)
+  def has_observer(self, id):
+    return True if self.observers.get(id) else False
+
+  def add_observer(self, id, callback):
+    self.observers[id] = callback
+
+  def del_observer(self, id):
+    del self.observers[id]
 
   def clear_all(self, matching_connection):
-    self.obervers = []
+    self.obervers = {}
 
   def poll_update_errors(self):
     global lastLCNCerror
@@ -405,12 +412,12 @@ class LinuxCNCStatusPoller(object):
                          # someone adds or deletes files through
                          # other means than Rockhopper (i.e. through 
                          # the terminal, ssh, etc.)
-    for observer in self.observers_low_priority:
+    for (id,observer) in self.observers_low_priority.items():
       try:
-        observer()
+        observer(id)
       except Exception as ex:
         logger.error("error in observer: %s" % traceback.format_exc())
-        self.del_observer_low_priority(observer)
+        self.del_observer_low_priority(id)
 
   def poll_update(self):
     global linuxcnc_command
@@ -435,12 +442,12 @@ class LinuxCNCStatusPoller(object):
       linuxcnc_command = None
 
     # notify all obervers of new status data poll
-    for observer in self.observers:
+    for (id,observer) in self.observers.items():
       try:
-        observer()
+        observer(id)
       except Exception as ex:
         logger.error("error in observer: %s" % traceback.format_exc())
-        self.del_observer(observer)
+        self.del_observer(id)
 
 
 # *****************************************************
@@ -2058,6 +2065,7 @@ INIFileDataTemplate = {
 class LinuxCNCServerCommand( object ):
   # Error codes
   REPLY_NAK = '?ERR'
+  REPLY_WATCH_ID_NOT_FOUND = '?Watch ID Not Found'
   REPLY_STATUS_NOT_FOUND = '?Status Item Not Found'
   REPLY_INVALID_COMMAND = '?Invalid Command'
   REPLY_INVALID_COMMAND_PARAMETER = '?Invalid Parameter'
@@ -2099,13 +2107,13 @@ class LinuxCNCServerCommand( object ):
     val = json.dumps( self.replyval, cls=StatusItemEncoder )
     return val
 
-  def on_new_poll_low_priority(self):
+  def on_new_poll_low_priority(self, id):
     try:
       if (not self.statusitem.watchable):
-        self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+        self.linuxcnc_status_poller.del_observer_low_priority(id)
         return
       if self.server_command_handler.isclosed:
-        self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+        self.linuxcnc_status_poller.del_observer_low_priority(id)
         return
 
       newval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
@@ -2113,19 +2121,19 @@ class LinuxCNCServerCommand( object ):
         self.replyval = newval
         self.server_command_handler.send_message( self.form_reply() )
         if newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK:
-          self.linuxcnc_status_poller.del_observer_low_priority( self.on_new_poll_low_priority )
+          self.linuxcnc_status_poller.del_observer_low_priority(id)
 
     except:
       pass
 
   # update on a watched variable 
-  def on_new_poll( self ):
+  def on_new_poll( self, id ):
     try:
       if (not self.statusitem.watchable):
-        self.linuxcnc_status_poller.del_observer( self.on_new_poll )
+        self.linuxcnc_status_poller.del_observer(id)
         return
       if self.server_command_handler.isclosed:
-        self.linuxcnc_status_poller.del_observer( self.on_new_poll )
+        self.linuxcnc_status_poller.del_observer(id)
         return
 
       newval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
@@ -2134,7 +2142,7 @@ class LinuxCNCServerCommand( object ):
         self.replyval = newval
         self.server_command_handler.send_message( self.form_reply() )
         if newval['code'] != LinuxCNCServerCommand.REPLY_COMMAND_OK:
-          self.linuxcnc_status_poller.del_observer( self.on_new_poll )
+          self.linuxcnc_status_poller.del_observer(id)
 
     except:
       pass
@@ -2210,13 +2218,28 @@ class LinuxCNCServerCommand( object ):
             self.replyval['index'] = self.item_index
           self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
           if self.replyval['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK:
+            clientCommandId = self.server_command_handler.uuid + "/" + self.commandID
             if self.statusitem.lowPriority:
-              self.linuxcnc_status_poller.add_observer_low_priority( self.on_new_poll_low_priority )
+              self.linuxcnc_status_poller.add_observer_low_priority( clientCommandId,  self.on_new_poll_low_priority )
             else:
-              self.linuxcnc_status_poller.add_observer( self.on_new_poll )
+              self.linuxcnc_status_poller.add_observer( clientCommandId, self.on_new_poll )
       except:
         logger.error("error in watch: %s" % traceback.format_exc())
         self.replyval['code'] = LinuxCNCServerCommand.REPLY_NAK
+    elif self.command == 'unwatch':
+      clientCommandId = self.server_command_handler.uuid + "/" + self.commandDict['watch_id']
+      hasLowPriorityObserver = self.linuxcnc_status_poller.has_observer_low_priority(clientCommandId)
+      hasObserver = self.linuxcnc_status_poller.has_observer(clientCommandId)
+      if hasLowPriorityObserver:
+        self.linuxcnc_status_poller.del_observer_low_priority(clientCommandId)
+
+      if hasObserver:
+        self.linuxcnc_status_poller.del_observer(clientCommandId)
+
+      if hasLowPriorityObserver or hasObserver:
+        self.replyval = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
+      else:
+        self.replyval = { 'code': LinuxCNCServerCommand.REPLY_WATCH_ID_NOT_FOUND }
     elif self.command == 'list_get':
       try:
         self.replyval['data'] = StatusItems.values()
@@ -2262,6 +2285,7 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
   def __init__(self, *args, **kwargs):
     super( LinuxCNCCommandWebSocketHandler, self ).__init__( *args, **kwargs )
     self.user_validated = False
+    self.uuid = str(uuid.uuid4())
     logger.info("New websocket connection...")
 
   def check_origin(self, origin):
