@@ -412,6 +412,8 @@ class LinuxCNCStatusPoller(object):
                          # someone adds or deletes files through
                          # other means than Rockhopper (i.e. through 
                          # the terminal, ssh, etc.)
+#    logger.debug("Number of observers: %s" % (len(self.observers.keys()),))
+#    logger.debug("Number of low priority observers: %s" % (len(self.observers_low_priority.keys()),))
     for (id,observer) in self.observers_low_priority.items():
       try:
         observer(id)
@@ -2067,7 +2069,7 @@ INIFileDataTemplate = {
 class LinuxCNCServerCommand( object ):
   # Error codes
   REPLY_NAK = '?ERR'
-  REPLY_WATCH_ID_NOT_FOUND = '?Watch ID Not Found'
+  REPLY_STATUS_ITEM_NOT_BEING_WATCHED = '?Status Item Not Being Watched'
   REPLY_STATUS_NOT_FOUND = '?Status Item Not Found'
   REPLY_INVALID_COMMAND = '?Invalid Command'
   REPLY_INVALID_COMMAND_PARAMETER = '?Invalid Parameter'
@@ -2162,6 +2164,9 @@ class LinuxCNCServerCommand( object ):
     
     return
 
+  def get_watch_id(self):
+    return self.server_command_handler.uuid + "/" + self.commandDict['name']
+    
   # this is the main interface to a LinuxCNCServerCommand.  This determines what the command is, and executes it.
   # Callbacks are made to the self.server_command_handler to write output to the websocket
   # The self.linuxcnc_status_poller is used to poll the linuxcnc status, which is used to watch status items and monitor for changes
@@ -2220,28 +2225,28 @@ class LinuxCNCServerCommand( object ):
             self.replyval['index'] = self.item_index
           self.replyval = self.statusitem.get_cur_status_value(self.linuxcnc_status_poller, self.item_index, self.commandDict )
           if self.replyval['code'] == LinuxCNCServerCommand.REPLY_COMMAND_OK:
-            clientCommandId = self.server_command_handler.uuid + "/" + self.commandID
+            watchId = self.get_watch_id()
             if self.statusitem.lowPriority:
-              self.linuxcnc_status_poller.add_observer_low_priority( clientCommandId,  self.on_new_poll_low_priority )
+              self.linuxcnc_status_poller.add_observer_low_priority( watchId,  self.on_new_poll_low_priority )
             else:
-              self.linuxcnc_status_poller.add_observer( clientCommandId, self.on_new_poll )
+              self.linuxcnc_status_poller.add_observer( watchId, self.on_new_poll )
       except:
         logger.error("error in watch: %s" % traceback.format_exc())
         self.replyval['code'] = LinuxCNCServerCommand.REPLY_NAK
     elif self.command == 'unwatch':
-      clientCommandId = self.server_command_handler.uuid + "/" + self.commandDict['watch_id']
-      hasLowPriorityObserver = self.linuxcnc_status_poller.has_observer_low_priority(clientCommandId)
-      hasObserver = self.linuxcnc_status_poller.has_observer(clientCommandId)
+      watchId = self.get_watch_id()
+      hasLowPriorityObserver = self.linuxcnc_status_poller.has_observer_low_priority(watchId)
+      hasObserver = self.linuxcnc_status_poller.has_observer(watchId)
       if hasLowPriorityObserver:
-        self.linuxcnc_status_poller.del_observer_low_priority(clientCommandId)
+        self.linuxcnc_status_poller.del_observer_low_priority(watchId)
 
       if hasObserver:
-        self.linuxcnc_status_poller.del_observer(clientCommandId)
+        self.linuxcnc_status_poller.del_observer(watchId)
 
       if hasLowPriorityObserver or hasObserver:
         self.replyval = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK }
       else:
-        self.replyval = { 'code': LinuxCNCServerCommand.REPLY_WATCH_ID_NOT_FOUND }
+        self.replyval = { 'code': LinuxCNCServerCommand.REPLY_STATUS_ITEM_NOT_BEING_WATCHED }
     elif self.command == 'list_get':
       try:
         self.replyval['data'] = StatusItems.values()
