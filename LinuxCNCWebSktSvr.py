@@ -404,8 +404,8 @@ class LinuxCNCStatusPoller(object):
             self.errorid = self.errorid + 1 
         except:
           pass
-    except Exception as e:
-      logger.error("Exception during poll_update_errors: %s" % (e,))
+    except:
+      logger.error("Exception during poll_update_errors: %s" % traceback.format_exc())
 
   def poll_update_low_priority(self):
     update_gcode_files() # update gcode files to catch case where
@@ -547,9 +547,9 @@ class StatusItem( object ):
           lastBackplotData = gr.to_json(maxlines=MAX_BACKPLOT_LINES)
           lastBackplotFilename = filename
         reply = {'data':lastBackplotData, 'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
-      except Exception as ex:
+      except:
         reply = {'data':'','code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
-        logger.error("Error in back plot: %s" % (ex,))
+        logger.error("Exception in do_backplot: %s" % traceback.format_exc())
       BackplotLock.release()
 
       async_lock.acquire()
@@ -616,8 +616,8 @@ class StatusItem( object ):
       while ( nowTime - data_list[0][0] ) > 3600:
         data_list.pop(0)
 
-    except Exception as ex:
-      logger.error("Exception in update_hss_sensor_data: %s" % (ex,))
+    except:
+      logger.error("Exception in update_hss_sensor_data: %s" % traceback.format_exc())
 
 
   def read_gcode_file( self, filename ):
@@ -860,8 +860,8 @@ class StatusItem( object ):
       ret['data'] = 'static/calibration.zip'
 
       shutil.rmtree(tmpDir)
-    except Exception as ex:
-      logger.error("exception in get_calibration_data: %s" % (ex,))
+    except:
+      logger.error("Exception in get_calibration_data: %s" % traceback.format_exc())
       ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
       ret['data'] = ''
     return ret
@@ -887,14 +887,14 @@ class StatusItem( object ):
         else:
           self.halBinding = machinekit.hal.Signal( self.name[7:] )
       except RuntimeError as ex:
-        logger.error('RuntimeError error binding StatusItem attribute to HAL object: %s' % (ex,))
+        logger.error('RuntimeError error binding StatusItem attribute to HAL object: %s' % traceback.format_exc())
         ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
         ret['data'] = ''
         return ret
     try:
       ret['data'] = self.halBinding.get()
     except Exception as ex:
-      logger.error('Exception getting StatusItem HAL Pin value: %s' % (ex,))
+      logger.error('Exception getting StatusItem HAL Pin value: %s' % (traceback.format_exc()))
       ret['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
       ret['data'] = ''
     return ret
@@ -1319,8 +1319,8 @@ class CommandItem( object ):
           if was_on:
             linuxcnc_command.state(linuxcnc.STATE_ON)
           reply['code'] = LinuxCNCServerCommand.REPLY_COMMAND_OK
-        except Exception as ex:
-          logger.error("Error setting hal pin: %s" % (ex,))
+        except:
+          logger.error("Error setting hal pin: %s" % (traceback.format_exc(),))
       else:
         logger.error("No pin found for variable %s in section %s" % (data['name'], data['section']))
     else:
@@ -1411,8 +1411,8 @@ class CommandItem( object ):
     reply = { 'code': LinuxCNCServerCommand.REPLY_COMMAND_OK, 'data' : { 'isSwapCmd' : 'true' } }
     try:
       subprocess.call(['sudo', 'swapon', '/my_swap'])
-    except Exception as e:
-      logger.error('enable swap exception: %s' % (e,))
+    except:
+      logger.error("Exception in enable_swap: %s" % traceback.format_exc())
       reply["code"] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
 
     return reply
@@ -1547,8 +1547,8 @@ class CommandItem( object ):
         os.remove(os.path.join(path, f))
       except:
         reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-    except Exception as ex:
-      logger.error("Exception in del_gcode_file: %s" % (ex,))
+    except:
+      logger.error("Exception in del_gcode_file: %s" % traceback.format_exc())
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     return reply         
 
@@ -1589,8 +1589,8 @@ class CommandItem( object ):
           fo.close()
         except:
           reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
-    except Exception as ex:
-      logger.error("Exception in put_gcode_file: %s" % (ex,))
+    except:
+      logger.error("Exception in put_gcode_file: %s" % traceback.format_exc())
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     return reply
 
@@ -1631,8 +1631,8 @@ class CommandItem( object ):
         reply['data'] = newFilename
         uploadingFile.close()
         update_gcode_files()
-    except Exception as ex:
-      logger.error("Exception in put_chunk_gcode_file: %s" % (ex,))
+    except:
+      logger.error("Exception in put_chunk_gcode_file: %s" % traceback.format_exc())
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     return reply         
  
@@ -1743,7 +1743,7 @@ class CommandItem( object ):
             }
             LINUXCNCSTATUS.errorid += 1
           except subprocess.CalledProcessError as umountExc:
-            logger.error("Exception in unmount during eject_usb: %s" % (umountExc,))
+            logger.error("Exception in unmount during eject_usb: %s" % traceback.format_exc())
             lastLCNCerror = {
               "kind": "eject_usb",
               "type":"error",
@@ -1754,7 +1754,7 @@ class CommandItem( object ):
             LINUXCNCSTATUS.errorid += 1
             reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     except Exception as ex:
-      logger.error("Exception in eject_usb: %s" % (ex,))
+      logger.error("Exception in eject_usb: %s" % traceback.format_exc())
       lastLCNCerror = {
         "kind": "eject_usb",
         "type":"error",
@@ -1778,8 +1778,8 @@ class CommandItem( object ):
     try:
       machinekit.hal.Pin("interlock.release").set(1)
       return {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK }
-    except Exception as e:
-      logger.error("Exception in interlock_release: %s" % (e,))
+    except:
+      logger.error("Exception in interlock_release: %s" % traceback.format_exc())
       return {'code':LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
   def shutdown_linuxcnc( self ):
@@ -2329,8 +2329,8 @@ class LinuxCNCCommandWebSocketHandler(tornado.websocket.WebSocketHandler):
           if int(options.verbose) > 3:
             if (reply.find("\"HB\"") < 0) and (reply.find("backplot") < 0):
                 print "Reply: " + reply
-      except Exception as ex:
-        logger.error("Exception in on_message: %s" % (ex,))
+      except:
+        logger.error("Exception in on_message: %s" % traceback.format_exc())
     else:
       try: 
         commandDict = json.loads( message )
@@ -2525,8 +2525,8 @@ def readUserList():
     parser.read(os.path.join(application_path,'users.ini'))
     for name, value in parser.items('users'):
       userdict[name] = value
-  except Exception as ex:
-    logger.error("Error reading users.ini: %s" % (ex,))
+  except:
+    logger.error("Error reading users.ini: %s" % traceback.format_exc())
 
 # *****************************************************
 # *****************************************************
