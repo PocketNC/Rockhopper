@@ -574,8 +574,8 @@ class StatusItem( object ):
       gr = GCodeReader.GCodeRender( INI_FILENAME )
       gr.load()
       reply = gr.to_json(maxlines=MAX_BACKPLOT_LINES)
-    except ex:
-      logger.error("Exception in backplot: %s" % (ex,))
+    except:
+      logger.error("Exception in backplot: %s" % traceback.format_exc())
     BackplotLock.release()
     return reply
 
@@ -624,8 +624,8 @@ class StatusItem( object ):
     try:
       f = open(filename, 'r')
       ret = f.read()
-    except ex:
-      logger.error("Exception in read_gcode_file: %s" % (ex,))
+    except:
+      logger.error("Exception in read_gcode_file: %s" % traceback.format_exc())
       ret = ""
     finally:
       f.close()
@@ -1362,8 +1362,8 @@ class CommandItem( object ):
         logger.info("Writing version file")
         boardRevision.writeVersionFile("v1revH")
       return self.restart_linuxcnc_and_rockhopper()
-    except e:
-      logger.error("Exception in toggle_v1_v2revP: %s" % (e,))
+    except:
+      logger.error("Exception in toggle_v1_v2revP: %s" % traceback.format_exc())
       return { "code": LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND }
 
   def set_version(self, version):
@@ -1644,8 +1644,8 @@ class CommandItem( object ):
       f.seek(idx)
       data = f.read(size)
       reply['data'] = data
-    except ex:
-      logger.error("Exception in get_chunk_gcode_file: %s" % (ex,))
+    except:
+      logger.error("Exception in get_chunk_gcode_file: %s" % traceback.format_exc())
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     finally:
       f.close()
@@ -1656,8 +1656,8 @@ class CommandItem( object ):
     reply = {'code':LinuxCNCServerCommand.REPLY_COMMAND_OK}
     try:
       reply['data'] = os.path.getsize(linuxcnc_status_poller.linuxcnc_status.file)
-    except ex:
-      logger.error("Exception in get_gcode_file_size: %s" % (ex,))
+    except:
+      logger.error("Exception in get_gcode_file_size: %s" % traceback.format_exc())
       reply['code'] = LinuxCNCServerCommand.REPLY_ERROR_EXECUTING_COMMAND
     return reply
 
